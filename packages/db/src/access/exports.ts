@@ -44,12 +44,23 @@ const columns = {
 export async function latestAnnotations(
   scope: OrgScope,
   projectId: string,
+  /** Only assets directly in these folders; undefined = whole project. */
+  folderIds?: string[],
 ): Promise<{ assetId: string; annotationId: string; version: number }[]> {
+  const inFolders =
+    folderIds === undefined
+      ? sql`true`
+      : folderIds.length === 0
+        ? sql`false`
+        : sql`a.folder_id in (${sql.join(
+            folderIds.map((f) => sql`${f}::uuid`),
+            sql`, `,
+          )})`;
   const rows = await scope.db.execute<{ asset_id: string; annotation_id: string; version: number }>(sql`
     select distinct on (an.asset_id) an.asset_id, an.id as annotation_id, an.version
     from ${annotations} an
     join ${assets} a on a.id = an.asset_id
-    where a.project_id = ${projectId} and a.org_id = ${scope.orgId}
+    where a.project_id = ${projectId} and a.org_id = ${scope.orgId} and ${inFolders}
     order by an.asset_id, an.version desc`);
   return rows.map((r) => ({ assetId: r.asset_id, annotationId: r.annotation_id, version: r.version }));
 }
@@ -66,6 +77,8 @@ export async function createExport(
     name: string;
     format: string;
     options: Record<string, unknown>;
+    /** Limit to files directly in these folders (pass a subtree's ids); undefined = whole project. */
+    folderIds?: string[];
     assign: (assetIds: string[]) => Map<string, Split>;
   },
 ): Promise<ExportRow> {
@@ -76,7 +89,7 @@ export async function createExport(
     .where(and(eq(projects.id, input.projectId), eq(projects.orgId, scope.orgId)));
   if (!project) throw new AccessError("NOT_FOUND", "Project not found.");
 
-  const latest = await latestAnnotations(scope, input.projectId);
+  const latest = await latestAnnotations(scope, input.projectId, input.folderIds);
   if (latest.length === 0) {
     throw new AccessError("CONFLICT", "Nothing to export yet. Label and save at least one item.");
   }

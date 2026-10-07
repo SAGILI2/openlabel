@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { annotations, assets, predictions, projects } from "../schema/index.js";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { annotations, assets, folders, predictions, projects } from "../schema/index.js";
 import { AccessError } from "./errors.js";
 import { enqueueJob } from "./jobs.js";
 import { requireRole, type OrgScope } from "./scope.js";
@@ -10,6 +10,7 @@ export type AssetStatus = (typeof assets.$inferSelect)["status"];
 export interface AssetRow {
   id: string;
   projectId: string;
+  folderId: string | null;
   kind: AssetKind;
   storageKey: string;
   sha256: string;
@@ -24,6 +25,7 @@ export interface AssetRow {
 const columns = {
   id: assets.id,
   projectId: assets.projectId,
+  folderId: assets.folderId,
   kind: assets.kind,
   storageKey: assets.storageKey,
   sha256: assets.sha256,
@@ -51,6 +53,8 @@ export async function registerAsset(
   scope: OrgScope,
   input: {
     projectId: string;
+    /** Folder to put the file in; null/omitted = project root. Must belong to the project. */
+    folderId?: string | null;
     kind: AssetKind;
     storageKey: string;
     sha256: string;
@@ -62,6 +66,13 @@ export async function registerAsset(
 ): Promise<{ asset: AssetRow; created: boolean }> {
   requireRole(scope, "manager");
   await projectInScope(scope, input.projectId);
+  if (input.folderId) {
+    const [folder] = await scope.db
+      .select({ id: folders.id })
+      .from(folders)
+      .where(and(eq(folders.id, input.folderId), eq(folders.projectId, input.projectId)));
+    if (!folder) throw new AccessError("NOT_FOUND", "Folder not found.");
+  }
   return scope.db.transaction(async (tx) => {
     const inserted = await tx
       .insert(assets)
@@ -87,13 +98,29 @@ export async function registerAsset(
   });
 }
 
-/** Assets of a project in the scoped organisation, oldest first. */
-export async function listAssets(scope: OrgScope, projectId: string): Promise<AssetRow[]> {
+/**
+ * Assets of a project in the scoped organisation, oldest first. `folders` narrows the listing:
+ * undefined = whole project, null = files at the project root only, an id list = files directly
+ * in those folders.
+ */
+export async function listAssets(
+  scope: OrgScope,
+  projectId: string,
+  folders?: string[] | null,
+): Promise<AssetRow[]> {
   await projectInScope(scope, projectId);
+  const inFolder =
+    folders === undefined
+      ? undefined
+      : folders === null
+        ? isNull(assets.folderId)
+        : folders.length === 0
+          ? sql`false`
+          : inArray(assets.folderId, folders);
   return scope.db
     .select(columns)
     .from(assets)
-    .where(and(eq(assets.projectId, projectId), eq(assets.orgId, scope.orgId)))
+    .where(and(eq(assets.projectId, projectId), eq(assets.orgId, scope.orgId), inFolder))
     .orderBy(asc(assets.createdAt));
 }
 
