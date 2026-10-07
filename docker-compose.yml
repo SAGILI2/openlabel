@@ -1,0 +1,95 @@
+# OpenLabel — full stack for local use and single-server deployment.
+#   cp .env.example .env && docker compose up -d
+name: openlabel
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # S3-compatible object storage (SeaweedFS, Apache-2.0). Any S3 service works: set S3_* in .env.
+  storage:
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+    entrypoint: ["/bin/sh", "/config/entrypoint.sh"]
+    volumes:
+      - storage-data:/data
+      - ./deploy/seaweedfs/entrypoint.sh:/config/entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: creates the bucket on first start, then exits.
+  storage-init:
+    image: chrislusf/seaweedfs:latest
+    depends_on:
+      storage:
+        condition: service_healthy
+    environment:
+      S3_BUCKET: ${S3_BUCKET}
+    entrypoint: ["/bin/sh", "/config/create-bucket.sh"]
+    volumes:
+      - ./deploy/seaweedfs/create-bucket.sh:/config/create-bucket.sh:ro
+    restart: "no"
+
+  # One-shot: applies pending database migrations, then exits.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      target: migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      target: runtime
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  storage-data:

@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens (docs/design/design-system.md).
+ * Semantic names follow shadcn/ui so its components theme automatically.
+ */
+:root {
+  --radius: 0.375rem;
+
+  --background: #f7f8f6; /* paper */
+  --foreground: #1c2126; /* graphite */
+  --card: #ffffff; /* sheet */
+  --card-foreground: #1c2126;
+  --popover: #ffffff;
+  --popover-foreground: #1c2126;
+  --primary: #1c2126;
+  --primary-foreground: #f7f8f6;
+  --secondary: #eef0ee;
+  --secondary-foreground: #1c2126;
+  --muted: #eef0ee;
+  --muted-foreground: #5b6670; /* slate */
+  --accent: #e8eefb;
+  --accent-foreground: #1c3f8f;
+  --destructive: #c92a2a;
+  --border: #dde1e3; /* rule */
+  --input: #d3d8db;
+  --ring: #2b59c3; /* cobalt */
+  --brand: #2b59c3;
+  --brand-foreground: #ffffff;
+
+  --success: #2f9e44;
+  --warning: #e8a400;
+
+  /* Annotation inks — reserved for labels on the canvas. */
+  --ink-1: #2b59c3;
+  --ink-2: #d9480f;
+  --ink-3: #2f9e44;
+  --ink-4: #ae3ec9;
+  --ink-5: #e8a400;
+  --ink-6: #0c8599;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1c2126;
+  --sidebar-border: #dde1e3;
+}
+
+.dark {
+  --background: #14181b;
+  --foreground: #e6e9ec;
+  --card: #1b2024;
+  --card-foreground: #e6e9ec;
+  --popover: #1b2024;
+  --popover-foreground: #e6e9ec;
+  --primary: #e6e9ec;
+  --primary-foreground: #14181b;
+  --secondary: #232a2f;
+  --secondary-foreground: #e6e9ec;
+  --muted: #232a2f;
+  --muted-foreground: #9aa4ae;
+  --accent: #1f2b45;
+  --accent-foreground: #b9cbf7;
+  --destructive: #e5534b;
+  --border: #2b3237;
+  --input: #343c42;
+  --ring: #6f95f0;
+  --brand: #6f95f0;
+  --brand-foreground: #0d1626;
+
+  --sidebar: #1b2024;
+  --sidebar-foreground: #e6e9ec;
+  --sidebar-border: #2b3237;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-ink-5: var(--ink-5);
+  --color-ink-6: var(--ink-6);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    font-feature-settings:
+      "tnum" 1,
+      "cv11" 1;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

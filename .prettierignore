@@ -1,0 +1,5 @@
+pnpm-lock.yaml
+**/drizzle/**
+LICENSE
+CODE_OF_CONDUCT.md
+docs/tickets/BOARD.md
