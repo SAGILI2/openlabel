@@ -5,7 +5,8 @@ const config: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   transpilePackages: ["@openlabel/contracts"],
-  serverExternalPackages: ["postgres"],
+  experimental: { serverActions: { bodySizeLimit: "2mb" } },
+  serverExternalPackages: ["postgres", "@aws-sdk/client-s3"],
 };
 
 export default config;

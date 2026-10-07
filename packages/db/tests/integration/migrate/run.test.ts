@@ -64,11 +64,14 @@ describe("runMigrations", () => {
         select table_name from information_schema.tables where table_schema = 'public' order by table_name`;
       expect(rows.map((r) => r.table_name)).toEqual([
         "accounts",
+        "annotations",
         "assets",
         "audit_events",
         "invitations",
+        "jobs",
         "memberships",
         "organizations",
+        "predictions",
         "projects",
         "rate_limits",
         "sessions",

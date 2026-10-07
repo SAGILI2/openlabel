@@ -6,6 +6,7 @@ import { projects } from "./projects.js";
 export const assetKind = pgEnum("asset_kind", ["image", "pdf", "audio", "video", "text"]);
 export const assetStatus = pgEnum("asset_status", [
   "new",
+  "prelabelling",
   "prelabelled",
   "in_progress",
   "submitted",

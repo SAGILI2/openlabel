@@ -4,3 +4,4 @@ export * from "./assets.js";
 export * from "./audit.js";
 export * from "./auth.js";
 export * from "./invitations.js";
+export * from "./labelling.js";

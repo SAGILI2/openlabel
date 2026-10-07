@@ -1,0 +1,23 @@
+{
+  "name": "@openlabel/worker",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --watch dist/main.js",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src tests",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openlabel/contracts": "workspace:*",
+    "@openlabel/db": "workspace:*",
+    "@openlabel/storage": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1"
+  }
+}

@@ -61,6 +61,37 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # OCR model service (docTR on CPU) behind POST /predict. Swap for any engine with the same contract.
+  ocr:
+    build:
+      context: services/ocr-doctr
+    image: openlabel-ocr-doctr:dev
+    restart: unless-stopped
+    environment:
+      OCR_THREADS: ${OCR_THREADS:-4}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # Background jobs. Stateless: `docker compose up -d --scale worker=4` for more throughput.
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      target: worker
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      storage-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+
   web:
     build:
       context: .
