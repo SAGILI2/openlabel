@@ -52,8 +52,11 @@ export interface EditorProps {
   source: "annotation" | "prediction" | "empty";
   engine: string | null;
   backHref: string;
-  /** Pages in the current folder, in order, for the film-strip and prev/next. */
+  /** Pages around this one in the current folder, in order, for the film-strip and prev/next. */
   strip: StripItem[];
+  /** This page's position (0-based) and the folder's page count, for the "12/80,245" counter. */
+  position: number;
+  total: number;
   review: ReviewView;
   reviewers: ReviewerOption[];
   canReview: boolean;
@@ -371,7 +374,7 @@ export function Editor(props: EditorProps) {
         <span className="min-w-0 truncate font-mono text-[12.5px]">{props.assetName}</span>
         {index >= 0 && (
           <span className="text-muted-foreground shrink-0 text-[12px] tabular-nums">
-            {index + 1}/{props.strip.length}
+            {(props.position + 1).toLocaleString()}/{props.total.toLocaleString()}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
@@ -763,7 +766,7 @@ export function Editor(props: EditorProps) {
                   className="h-full w-full object-cover object-top"
                 />
                 <span className="bg-card/90 absolute bottom-0.5 left-0.5 rounded px-1 font-mono text-[9px] tabular-nums">
-                  {i + 1}
+                  {props.position - index + i + 1}
                 </span>
                 {s.done && (
                   <span className="bg-success absolute top-0.5 right-0.5 grid size-3.5 place-items-center rounded-full text-white">

@@ -14,7 +14,8 @@ export default async function ProjectLayout({
   const { slug } = await params;
   const { project, tree, counts, taskTitle } = await loadProject(slug);
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // Exactly the viewport height under the app chrome, so tabs manage their own scrolling.
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <TopBar title={project.name} />
       <ProjectHeader
         slug={project.slug}

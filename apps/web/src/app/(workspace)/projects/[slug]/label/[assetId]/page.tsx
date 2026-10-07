@@ -3,7 +3,7 @@ import {
   AccessError,
   getLabellingState,
   getReviewState,
-  listAssets,
+  assetNeighbours,
   listEligibleReviewers,
   REVIEWER_ROLES,
   subtreeFolderIds,
@@ -27,22 +27,23 @@ export default async function LabelPage({
   const folder =
     query.folder === "root" ? "root" : query.folder && paths.has(query.folder) ? query.folder : null;
 
-  const [state, assets] = await Promise.all([
-    getLabellingState(scope, assetId).catch((err: unknown) => {
-      if (err instanceof AccessError) notFound();
-      throw err;
-    }),
-    listAssets(
-      scope,
-      project.id,
-      folder === null
-        ? undefined
-        : folder === "root"
-          ? null
-          : await subtreeFolderIds(scope, project.id, folder),
-    ),
-  ]);
+  const state = await getLabellingState(scope, assetId).catch((err: unknown) => {
+    if (err instanceof AccessError) notFound();
+    throw err;
+  });
   if (state.asset.projectId !== project.id) notFound();
+  // Only the files around this one: the film-strip and prev/next stay fast in huge projects.
+  const around = await assetNeighbours(
+    scope,
+    project.id,
+    assetId,
+    folder === null
+      ? undefined
+      : folder === "root"
+        ? null
+        : await subtreeFolderIds(scope, project.id, folder),
+  );
+  const assets = around.rows;
   const [review, reviewers] = await Promise.all([
     getReviewState(scope, assetId),
     listEligibleReviewers(scope),
@@ -76,6 +77,8 @@ export default async function LabelPage({
         source={source}
         engine={state.prediction?.engineVersion ?? null}
         backHref={`/projects/${slug}${suffix}`}
+        position={around.position}
+        total={around.total}
         strip={assets.map((a) => ({
           id: a.id,
           name: a.originalName,

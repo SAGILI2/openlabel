@@ -14,7 +14,7 @@ export default async function ProjectExportsPage({ params }: { params: Promise<{
   const paths = folderPaths(tree.roots);
 
   return (
-    <div className="grid w-full content-start gap-4 px-4 py-5 sm:px-6">
+    <div className="scrollbar-none grid min-h-0 w-full flex-1 content-start gap-4 overflow-y-auto px-4 py-5 sm:px-6">
       <AutoRefresh active={building} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="text-muted-foreground max-w-[640px] text-[13px]">

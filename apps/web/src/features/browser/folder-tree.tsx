@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,6 +119,42 @@ function Row({
   );
 }
 
+const BATCH = 100;
+
+/**
+ * Renders a long list of folders in batches: the next 100 appear as the end scrolls into view
+ * (like a feed), so a project with thousands of folders never renders them all at once.
+ */
+function Batched<T>({ items, render }: { items: T[]; render: (item: T) => React.ReactNode }) {
+  const [count, setCount] = useState(BATCH);
+  const end = useRef<HTMLLIElement>(null);
+  const more = count < items.length;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || !more) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setCount((c) => c + BATCH);
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    return () => {
+      io.disconnect();
+    };
+  }, [more, count]);
+  return (
+    <>
+      {items.slice(0, count).map(render)}
+      {more && (
+        <li ref={end} className="text-muted-foreground px-2 py-1.5 text-[11px] tabular-nums">
+          Showing {count.toLocaleString()} of {items.length.toLocaleString()} folders…
+        </li>
+      )}
+    </>
+  );
+}
+
 function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Props }) {
   const isActive = props.selected === node.id;
   const containsActive = (n: TreeNode): boolean =>
@@ -182,10 +218,9 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
                     onSelect={() => {
                       props.onDelete(node);
                     }}
-                    disabled={node.totalCount > 0}
                     className="text-destructive"
                   >
-                    <Trash2 /> Delete {node.totalCount > 0 ? "(not empty)" : ""}
+                    <Trash2 /> Delete…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -195,9 +230,10 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
       </div>
       {open && node.children.length > 0 && (
         <ul>
-          {node.children.map((c) => (
-            <Node key={c.id} node={c} depth={depth + 1} props={props} />
-          ))}
+          <Batched
+            items={node.children}
+            render={(c) => <Node key={c.id} node={c} depth={depth + 1} props={props} />}
+          />
         </ul>
       )}
     </li>
@@ -252,9 +288,7 @@ export function FolderTree(props: Props) {
         </p>
       ) : (
         <ul className="-ml-1">
-          {props.nodes.map((n) => (
-            <Node key={n.id} node={n} depth={0} props={props} />
-          ))}
+          <Batched items={props.nodes} render={(n) => <Node key={n.id} node={n} depth={0} props={props} />} />
         </ul>
       )}
     </nav>

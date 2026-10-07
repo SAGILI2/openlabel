@@ -1,5 +1,13 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { annotations, assets, folders, predictions, projects } from "../schema/index.js";
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import {
+  annotations,
+  assets,
+  auditEvents,
+  folders,
+  predictions,
+  projects,
+  reviewRequests,
+} from "../schema/index.js";
 import { AccessError } from "./errors.js";
 import { enqueueJob } from "./jobs.js";
 import { requireRole, type OrgScope } from "./scope.js";
@@ -131,6 +139,181 @@ export async function getAsset(scope: OrgScope, assetId: string): Promise<AssetR
     .where(and(eq(assets.id, assetId), eq(assets.orgId, scope.orgId)));
   if (!row) throw new AccessError("NOT_FOUND", "Asset not found.");
   return row;
+}
+
+/** File-browser filters, as the database sees them. */
+export type AssetFilter = "all" | "mine" | "todo" | "review" | "done" | "ocr";
+
+const FILTER_STATUSES: Record<Exclude<AssetFilter, "all" | "mine">, AssetStatus[]> = {
+  todo: ["prelabelled", "in_progress", "rejected"],
+  review: ["submitted"],
+  done: ["approved"],
+  ocr: ["new", "prelabelling"],
+};
+
+export type AssetSort = "oldest" | "newest" | "name" | "name-desc";
+
+const SORTS: Record<AssetSort, SQL[]> = {
+  oldest: [asc(assets.createdAt), asc(assets.id)],
+  newest: [desc(assets.createdAt), desc(assets.id)],
+  name: [asc(assets.originalName), asc(assets.id)],
+  "name-desc": [desc(assets.originalName), desc(assets.id)],
+};
+
+export interface AssetPage {
+  rows: AssetRow[];
+  /** Files matching the filter (all pages). */
+  total: number;
+  /** Counts per filter for the tabs, within the same folder scope. */
+  counts: Record<AssetFilter, number>;
+}
+
+function folderCondition(folders: string[] | null | undefined) {
+  if (folders === undefined) return sql`true`;
+  if (folders === null) return sql`${assets.folderId} is null`;
+  if (folders.length === 0) return sql`false`;
+  return inArray(assets.folderId, folders);
+}
+
+/**
+ * One page of a project's files for the browser, filtered and counted in the database so
+ * projects with tens of thousands of files stay fast. `folders` works as in {@link listAssets}.
+ */
+export async function pageAssets(
+  scope: OrgScope,
+  projectId: string,
+  opts: {
+    folders?: string[] | null | undefined;
+    filter: AssetFilter;
+    page: number;
+    pageSize: number;
+    /** Case-insensitive part of the file name. */
+    search?: string | undefined;
+    sort?: AssetSort | undefined;
+  },
+): Promise<AssetPage> {
+  await projectInScope(scope, projectId);
+  const term = opts.search?.trim().slice(0, 200);
+  const base = and(
+    eq(assets.projectId, projectId),
+    eq(assets.orgId, scope.orgId),
+    folderCondition(opts.folders),
+    // Escape LIKE wildcards so a search for "50%" means the text "50%".
+    term ? sql`${assets.originalName} ilike ${`%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`}` : undefined,
+  );
+  const mine = sql`(${assets.status} = 'submitted' and exists (select 1 from ${reviewRequests} rr
+    where rr.asset_id = ${assets.id} and rr.reviewer_user_id = ${scope.userId}))`;
+  const inStatuses = (key: Exclude<AssetFilter, "all" | "mine">) =>
+    inArray(assets.status, FILTER_STATUSES[key]);
+  const filterSql =
+    opts.filter === "all" ? sql`true` : opts.filter === "mine" ? mine : inStatuses(opts.filter);
+
+  const [countRow] = await scope.db
+    .select({
+      all: sql<number>`count(*)::int`,
+      mine: sql<number>`(count(*) filter (where ${mine}))::int`,
+      todo: sql<number>`(count(*) filter (where ${inStatuses("todo")}))::int`,
+      review: sql<number>`(count(*) filter (where ${inStatuses("review")}))::int`,
+      done: sql<number>`(count(*) filter (where ${inStatuses("done")}))::int`,
+      ocr: sql<number>`(count(*) filter (where ${inStatuses("ocr")}))::int`,
+    })
+    .from(assets)
+    .where(base);
+  const counts = countRow ?? { all: 0, mine: 0, todo: 0, review: 0, done: 0, ocr: 0 };
+  const size = Math.min(Math.max(opts.pageSize, 1), 500);
+  const rows = await scope.db
+    .select(columns)
+    .from(assets)
+    .where(and(base, filterSql))
+    .orderBy(...SORTS[opts.sort ?? "oldest"])
+    .limit(size)
+    .offset(Math.max(opts.page - 1, 0) * size);
+  return { rows, total: counts[opts.filter], counts };
+}
+
+/**
+ * Files around one file, for the labelling screen's prev/next and film-strip, without loading
+ * the whole project. Same order as the browser.
+ */
+export async function assetNeighbours(
+  scope: OrgScope,
+  projectId: string,
+  assetId: string,
+  folders: string[] | null | undefined,
+  radius = 40,
+): Promise<{ rows: AssetRow[]; index: number; position: number; total: number }> {
+  const target = await getAsset(scope, assetId);
+  const base = and(eq(assets.projectId, projectId), eq(assets.orgId, scope.orgId), folderCondition(folders));
+  const before = sql`(${assets.createdAt}, ${assets.id}) < (${target.createdAt.toISOString()}::timestamptz, ${target.id}::uuid)`;
+  const [pos] = await scope.db
+    .select({
+      before: sql<number>`(count(*) filter (where ${before}))::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(assets)
+    .where(base);
+  const index = pos?.before ?? 0;
+  const start = Math.max(index - radius, 0);
+  const rows = await scope.db
+    .select(columns)
+    .from(assets)
+    .where(base)
+    .orderBy(asc(assets.createdAt), asc(assets.id))
+    .limit(radius * 2 + 1)
+    .offset(start);
+  // index: within `rows`; position: within the whole folder.
+  return { rows, index: index - start, position: index, total: pos?.total ?? rows.length };
+}
+
+/**
+ * Deletes files with their predictions, labels, reviews and export membership (cascades), and
+ * returns the storage keys no other file still uses, for the caller to remove from storage.
+ */
+export async function deleteAssets(
+  scope: OrgScope,
+  projectId: string,
+  assetIds: string[],
+): Promise<{ deleted: number; orphanKeys: string[] }> {
+  requireRole(scope, "manager");
+  await projectInScope(scope, projectId);
+  const ids = [...new Set(assetIds)];
+  if (ids.length === 0) return { deleted: 0, orphanKeys: [] };
+  return scope.db.transaction(async (tx) => {
+    const gone: { id: string; storageKey: string }[] = [];
+    for (let i = 0; i < ids.length; i += 1000) {
+      gone.push(
+        ...(await tx
+          .delete(assets)
+          .where(
+            and(
+              eq(assets.projectId, projectId),
+              eq(assets.orgId, scope.orgId),
+              inArray(assets.id, ids.slice(i, i + 1000)),
+            ),
+          )
+          .returning({ id: assets.id, storageKey: assets.storageKey })),
+      );
+    }
+    const keys = [...new Set(gone.map((g) => g.storageKey))];
+    // The same bytes may be uploaded to another project; keep the object while anything uses it.
+    const used = new Set<string>();
+    for (let i = 0; i < keys.length; i += 1000) {
+      const still = await tx
+        .select({ storageKey: assets.storageKey })
+        .from(assets)
+        .where(inArray(assets.storageKey, keys.slice(i, i + 1000)));
+      for (const s of still) used.add(s.storageKey);
+    }
+    await tx.insert(auditEvents).values({
+      orgId: scope.orgId,
+      actorUserId: scope.userId,
+      action: "assets.deleted",
+      resourceType: "project",
+      resourceId: projectId,
+      details: { count: gone.length },
+    });
+    return { deleted: gone.length, orphanKeys: keys.filter((k) => !used.has(k)) };
+  });
 }
 
 /** Status counts for a project's progress bar. */

@@ -76,6 +76,8 @@ services:
       retries: 10
       start_period: 60s
 
+  # Same OCR service on an NVIDIA GPU (~80x faster per page). Use instead of `ocr`:
+  #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
   # Background jobs. Stateless: `docker compose up -d --scale worker=4` for more throughput.
   worker:
     build:

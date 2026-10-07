@@ -118,7 +118,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ projectId:
       sha256,
       byteSize: body.byteLength,
       mimeType: file.type,
-      originalName: file.name.slice(0, 255),
+      // Browsers send folder uploads with the path in the name; keep only the file name.
+      originalName: (file.name.split(/[/\\]/).pop() || file.name).slice(0, 255),
       mediaMeta: { width: dims.width, height: dims.height },
     });
     return NextResponse.json(
