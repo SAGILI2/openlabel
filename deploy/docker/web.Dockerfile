@@ -21,6 +21,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 # ---- build: compile packages and the Next.js standalone server
 FROM deps AS build
+# Unique per build unless supplied (CI can pass the git SHA); see next.config.ts deploymentId.
+ARG OPENLABEL_BUILD_ID
 COPY tsconfig.base.json turbo.json ./
 COPY packages packages
 COPY apps/web apps/web
@@ -29,7 +31,7 @@ RUN pnpm --filter @openlabel/contracts build \
  && pnpm --filter @openlabel/db build \
  && pnpm --filter @openlabel/storage build \
  && pnpm --filter @openlabel/worker build \
- && pnpm --filter @openlabel/web build \
+ && OPENLABEL_BUILD_ID="${OPENLABEL_BUILD_ID:-$(date +%s)}" pnpm --filter @openlabel/web build \
  && pnpm --filter @openlabel/worker deploy --prod --legacy /worker
 
 # ---- migrate: runs pending migrations and exits
