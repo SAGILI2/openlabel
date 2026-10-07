@@ -12,7 +12,7 @@ export default async function ProjectSettingsPage({ params }: { params: Promise<
     listEligibleReviewers(scope),
   ]);
   return (
-    <div className="grid w-full content-start gap-6 px-4 py-6 sm:px-6">
+    <div className="scrollbar-none grid min-h-0 w-full flex-1 content-start gap-6 overflow-y-auto px-4 py-6 sm:px-6">
       <div>
         <h2 className="text-[18px] font-semibold tracking-tight">Review rules</h2>
         <p className="text-muted-foreground mt-1 text-[13px]">

@@ -11,6 +11,7 @@ import {
   createExport,
   createFolder,
   createProject,
+  deleteAssets,
   deleteFolder,
   getProjectById,
   moveAssets,
@@ -23,11 +24,14 @@ import {
   submitManyForReview,
   reviewManyAssets,
   subtreeFolderIds,
+  pageAssets,
+  folderTree,
 } from "@openlabel/db";
 import { EXPORTERS } from "@openlabel/exporters";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { requireOrgScope } from "../orgs";
+import { getStore } from "../storage";
 import { getTaskTypeRegistry } from "../tasks";
 
 export type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string };
@@ -162,14 +166,46 @@ export async function renameFolderAction(
   }
 }
 
-export async function deleteFolderAction(projectId: string, folderId: string): Promise<ActionResult> {
+export async function deleteFolderAction(
+  projectId: string,
+  folderId: string,
+  withFiles = false,
+): Promise<ActionResult> {
   try {
     const { scope } = await requireOrgScope();
-    await deleteFolder(scope, z.uuid().parse(projectId), z.uuid().parse(folderId));
+    const r = await deleteFolder(scope, z.uuid().parse(projectId), z.uuid().parse(folderId), {
+      withFiles: z.boolean().parse(withFiles),
+    });
+    await removeObjects(r.orphanKeys);
     refresh();
     return { ok: true, data: undefined };
   } catch (err) {
     return fail(err);
+  }
+}
+
+/** Deletes files with their labels; their images leave storage once nothing else uses them. */
+export async function deleteFilesAction(projectId: string, assetIds: string[]): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    const r = await deleteAssets(
+      scope,
+      z.uuid().parse(projectId),
+      z.array(z.uuid()).max(5000).parse(assetIds),
+    );
+    await removeObjects(r.orphanKeys);
+    refresh();
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Best effort: a leftover object only costs space and never shows up anywhere. */
+async function removeObjects(keys: string[]): Promise<void> {
+  const store = getStore();
+  for (let i = 0; i < keys.length; i += 20) {
+    await Promise.allSettled(keys.slice(i, i + 20).map((k) => store.delete(k)));
   }
 }
 
@@ -312,6 +348,70 @@ export async function setReviewRulesAction(
     });
     refresh();
     return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export interface BrowserRow {
+  id: string;
+  name: string;
+  status: "new" | "prelabelling" | "prelabelled" | "in_progress" | "submitted" | "approved" | "rejected";
+  width: number | null;
+  height: number | null;
+  folderPath: string | null;
+}
+
+/** Next page of files for the file browser's infinite scroll. */
+export async function loadMoreFilesAction(input: {
+  projectId: string;
+  folder: string;
+  filter: string;
+  page: number;
+  pageSize: number;
+}): Promise<ActionResult<{ rows: BrowserRow[]; total: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const projectId = z.uuid().parse(input.projectId);
+    const filter = z.enum(["all", "mine", "todo", "review", "done", "ocr"]).parse(input.filter);
+    const tree = await folderTree(scope, projectId);
+    const paths = new Map<string, string>();
+    const walk = (nodes: typeof tree.roots) => {
+      for (const n of nodes) {
+        paths.set(n.id, n.path);
+        walk(n.children);
+      }
+    };
+    walk(tree.roots);
+    const folder = input.folder;
+    const folders =
+      folder === "all"
+        ? undefined
+        : folder === "root"
+          ? null
+          : paths.has(folder)
+            ? await subtreeFolderIds(scope, projectId, folder)
+            : undefined;
+    const listing = await pageAssets(scope, projectId, {
+      folders,
+      filter,
+      page: z.number().int().min(1).max(100_000).parse(input.page),
+      pageSize: z.number().int().min(1).max(500).parse(input.pageSize),
+    });
+    return {
+      ok: true,
+      data: {
+        total: listing.total,
+        rows: listing.rows.map((a) => ({
+          id: a.id,
+          name: a.originalName,
+          status: a.status,
+          width: typeof a.mediaMeta.width === "number" ? a.mediaMeta.width : null,
+          height: typeof a.mediaMeta.height === "number" ? a.mediaMeta.height : null,
+          folderPath: a.folderId ? (paths.get(a.folderId) ?? null) : null,
+        })),
+      },
+    };
   } catch (err) {
     return fail(err);
   }

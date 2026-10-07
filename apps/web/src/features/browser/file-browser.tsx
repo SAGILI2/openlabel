@@ -1,7 +1,12 @@
 "use client";
 import {
   CheckCircle2,
+  ArrowUpDown,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Circle,
   CircleDashed,
   Eye,
@@ -11,16 +16,19 @@ import {
   List,
   Loader2,
   Play,
+  Search,
   Send,
+  Trash2,
   Upload,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState, useTransition, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type DragEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/dialogs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   DropdownMenu,
@@ -34,6 +42,7 @@ import { BulkReviewDialog, SendForReviewDialog, type ReviewerOption } from "@/fe
 import { cn } from "@/lib/utils";
 import {
   createFolderAction,
+  deleteFilesAction,
   deleteFolderAction,
   moveAssetsAction,
   renameFolderAction,
@@ -51,6 +60,15 @@ export interface BrowserFile {
 }
 
 type Filter = "all" | "mine" | "todo" | "review" | "done" | "ocr";
+export type Sort = "oldest" | "newest" | "name" | "name-desc";
+export const DEFAULT_PAGE_SIZE = 100;
+const PAGE_SIZES = [50, 100, 200, 500];
+const SORT_LABELS: Record<Sort, string> = {
+  oldest: "Oldest first",
+  newest: "Newest first",
+  name: "Name A–Z",
+  "name-desc": "Name Z–A",
+};
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
@@ -117,9 +135,15 @@ interface Props {
   defaultReviewerIds: string[];
   /** Reviewer roles and up can approve or request changes. */
   canReview: boolean;
-  /** Pages in this project waiting for the signed-in user's review. */
-  myQueueIds: string[];
-  initialFilter: "all" | "mine" | "review";
+  /** Current filter, page and counts come from the server (filtered and paged in the database). */
+  filter: Filter;
+  counts: Record<Filter, number>;
+  page: number;
+  pageSize: number;
+  search: string;
+  sort: Sort;
+  /** Files matching the filter across all pages. */
+  total: number;
   view: "list" | "grid";
 }
 
@@ -130,9 +154,8 @@ const READY_FOR_REVIEW = new Set<BrowserFile["status"]>(["in_progress", "rejecte
 export function FileBrowser(props: Props) {
   const router = useRouter();
   const dialogs = useDialogs();
-  const [filter, setFilter] = useState<Filter>(props.initialFilter);
+  const filter = props.filter;
   const [bulkDecision, setBulkDecision] = useState<"approve" | "request_changes" | null>(null);
-  const mine = useMemo(() => new Set(props.myQueueIds), [props.myQueueIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [dropping, setDropping] = useState(false);
@@ -143,31 +166,56 @@ export function FileBrowser(props: Props) {
   const folderInput = useRef<HTMLInputElement>(null);
 
   const base = `/projects/${props.projectSlug}`;
-  const hrefFor = (sel: FolderSelection, view = props.view) => {
+  /** URL for a view of the browser; anything not given keeps its current value. */
+  const hrefFor = (
+    sel: FolderSelection,
+    view = props.view,
+    f: Filter = sel === props.selection ? filter : "all",
+    more: { page?: number; size?: number; search?: string; sort?: Sort } = {},
+  ) => {
     const q = new URLSearchParams();
     if (sel !== "all") q.set("folder", sel);
     if (view !== "list") q.set("view", view);
+    if (f !== "all") q.set("filter", f);
+    const page = more.page ?? 1;
+    const size = more.size ?? props.pageSize;
+    const search = more.search ?? (sel === props.selection ? props.search : "");
+    const sort = more.sort ?? props.sort;
+    if (page > 1) q.set("page", String(page));
+    if (size !== DEFAULT_PAGE_SIZE) q.set("size", String(size));
+    if (search) q.set("q", search);
+    if (sort !== "oldest") q.set("sort", sort);
     const s = q.toString();
     return s ? `${base}?${s}` : base;
   };
+  const pages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const firstShown = props.total === 0 ? 0 : (props.page - 1) * props.pageSize + 1;
+  const lastShown = Math.min(props.page * props.pageSize, props.total);
+  const [searchText, setSearchText] = useState(props.search);
+  const [pageInput, setPageInput] = useState(String(props.page));
+  const [shownPage, setShownPage] = useState(props.page);
+  if (shownPage !== props.page) {
+    setShownPage(props.page);
+    setPageInput(String(props.page));
+  }
+  // Search as you type, a moment after the last key.
+  useEffect(() => {
+    if (searchText === props.search) return;
+    const t = setTimeout(() => {
+      router.replace(hrefFor(props.selection, props.view, filter, { search: searchText.trim() }), {
+        scroll: false,
+      });
+    }, 350);
+    return () => {
+      clearTimeout(t);
+    };
+  });
+
   const labelHref = (id: string) =>
     `${base}/label/${id}${props.selection === "all" ? "" : `?folder=${props.selection}`}`;
 
-  const visible = useMemo(
-    () =>
-      props.files.filter((f) =>
-        filter === "all" ? true : filter === "mine" ? mine.has(f.id) : bucket(f.status) === filter,
-      ),
-    [props.files, filter, mine],
-  );
-  const counts = useMemo(() => {
-    const c = { all: props.files.length, mine: 0, todo: 0, review: 0, done: 0, ocr: 0 };
-    for (const f of props.files) {
-      c[bucket(f.status)] += 1;
-      if (mine.has(f.id)) c.mine += 1;
-    }
-    return c;
-  }, [props.files, mine]);
+  const visible = props.files;
+  const counts = props.counts;
   const nextToLabel = props.files.find((f) => bucket(f.status) === "todo");
   const targetFolderId = props.selection === "all" || props.selection === "root" ? null : props.selection;
 
@@ -178,11 +226,26 @@ export function FileBrowser(props: Props) {
     }, 4000);
   }
 
+  const uploadAbort = useRef<AbortController | null>(null);
+  const [uploading, setUploading] = useState(false);
   async function upload(items: UploadItem[]) {
     if (items.length === 0) return;
-    const result = await uploadAll(props.projectId, targetFolderId, items, setProgress);
+    const controller = new AbortController();
+    uploadAbort.current = controller;
+    setUploading(true);
+    // Refresh the list now and then while a big upload runs, not after every file.
+    const refresher = setInterval(() => {
+      router.refresh();
+    }, 8000);
+    const result = await uploadAll(props.projectId, targetFolderId, items, setProgress, {
+      signal: controller.signal,
+    });
+    clearInterval(refresher);
+    uploadAbort.current = null;
+    setUploading(false);
     router.refresh();
-    if (result.failed.length === 0) {
+    if (controller.signal.aborted) flash(`Upload stopped after ${result.done.toLocaleString()} files.`);
+    if (result.failed.length === 0 || controller.signal.aborted) {
       setTimeout(() => {
         setProgress(null);
       }, 2500);
@@ -238,15 +301,37 @@ export function FileBrowser(props: Props) {
   }
 
   async function removeFolder(node: TreeNode) {
+    const n = node.totalCount;
     const ok = await dialogs.confirm({
       title: `Delete "${node.name}"?`,
-      description: "The folder is empty. This can't be undone.",
-      confirmLabel: "Delete folder",
+      description:
+        n === 0
+          ? "The folder is empty. This can't be undone."
+          : `This deletes the folder, its sub-folders and ${n.toLocaleString()} ${n === 1 ? "file" : "files"} with all their labels, reviews and OCR drafts. Past exports keep their copies. This can't be undone.`,
+      confirmLabel:
+        n === 0 ? "Delete folder" : `Delete folder and ${n.toLocaleString()} ${n === 1 ? "file" : "files"}`,
       destructive: true,
     });
     if (!ok) return;
-    run(() => deleteFolderAction(props.projectId, node.id));
+    run(
+      () => deleteFolderAction(props.projectId, node.id, n > 0),
+      n > 0 ? `Deleted "${node.name}" and ${n.toLocaleString()} files.` : `Deleted "${node.name}".`,
+    );
     if (props.selection === node.id) router.push(hrefFor("all"));
+  }
+
+  async function removeSelected() {
+    const ids = [...selected];
+    const ok = await dialogs.confirm({
+      title: `Delete ${ids.length.toLocaleString()} ${ids.length === 1 ? "file" : "files"}?`,
+      description:
+        "Their labels, reviews and OCR drafts are deleted too. Past exports keep their copies. This can't be undone.",
+      confirmLabel: `Delete ${ids.length.toLocaleString()} ${ids.length === 1 ? "file" : "files"}`,
+      destructive: true,
+    });
+    if (!ok) return;
+    run(() => deleteFilesAction(props.projectId, ids), `Deleted ${ids.length.toLocaleString()} files.`);
+    setSelected(new Set());
   }
 
   function move(target: string | null, ids: string[]) {
@@ -290,7 +375,9 @@ export function FileBrowser(props: Props) {
 
   return (
     <div
-      className="relative grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)]"
+      // Fills the space under the project header; the folder tree and the file list scroll on
+      // their own, so the tree stays in place while a long list scrolls.
+      className="relative grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)]"
       onDragOver={(e) => {
         if (props.canEdit && e.dataTransfer.types.includes("Files")) {
           e.preventDefault();
@@ -326,7 +413,7 @@ export function FileBrowser(props: Props) {
         />
       </aside>
 
-      <section className="flex min-w-0 flex-col">
+      <section className="flex min-h-0 min-w-0 flex-col">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-6">
           {/* Folder picker for small screens */}
@@ -358,7 +445,8 @@ export function FileBrowser(props: Props) {
                 role="tab"
                 aria-selected={filter === f.id}
                 onClick={() => {
-                  setFilter(f.id);
+                  setSelected(new Set());
+                  router.push(hrefFor(props.selection, props.view, f.id));
                 }}
                 className={cn(
                   "rounded px-2.5 py-1 text-[12px] font-medium",
@@ -369,6 +457,38 @@ export function FileBrowser(props: Props) {
               </button>
             ))}
           </div>
+          <div className="relative w-full sm:w-56">
+            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
+            <Input
+              value={searchText}
+              onChange={(e) => {
+                setSearchText(e.target.value);
+              }}
+              placeholder="Search file names"
+              aria-label="Search file names"
+              className="h-8 pl-8 text-[13px]"
+            />
+          </div>
+          <Select
+            value={props.sort}
+            onValueChange={(v) => {
+              router.push(hrefFor(props.selection, props.view, filter, { sort: v as Sort }), {
+                scroll: false,
+              });
+            }}
+          >
+            <SelectTrigger size="sm" className="h-8 w-[140px] text-[13px]" aria-label="Sort">
+              <ArrowUpDown className="size-3.5 opacity-70" aria-hidden />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(SORT_LABELS) as Sort[]).map((k) => (
+                <SelectItem key={k} value={k}>
+                  {SORT_LABELS[k]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <div className="ml-auto flex items-center gap-2">
             {props.canReview && reviewScope && reviewIds.length > 0 && (
               <DropdownMenu>
@@ -405,6 +525,18 @@ export function FileBrowser(props: Props) {
               >
                 <Send aria-hidden />
                 {selected.size > 0 ? `Send ${String(selected.size)} for review` : "Send for review"}
+              </Button>
+            )}
+            {selected.size > 0 && props.canEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={() => {
+                  void removeSelected();
+                }}
+              >
+                <Trash2 aria-hidden /> Delete {selected.size}
               </Button>
             )}
             {selected.size > 0 && props.canEdit && (
@@ -535,8 +667,17 @@ export function FileBrowser(props: Props) {
                   />
                 </div>
                 <span className="text-muted-foreground tabular-nums">
-                  {progress.done} of {progress.total} uploaded
+                  {progress.done.toLocaleString()} of {progress.total.toLocaleString()} uploaded
                 </span>
+                {progress.done < progress.total && uploading && (
+                  <button
+                    type="button"
+                    onClick={() => uploadAbort.current?.abort()}
+                    className="text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+                  >
+                    Stop
+                  </button>
+                )}
                 {progress.failed.map((f) => (
                   <span key={f.name} className="text-destructive">
                     {f.name}: {f.reason}
@@ -679,6 +820,101 @@ export function FileBrowser(props: Props) {
             </div>
           )}
         </div>
+
+        {props.total > 0 && (
+          <nav
+            aria-label="Pages"
+            className="bg-card flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-2 text-[12px] sm:px-6"
+          >
+            <span className="text-muted-foreground tabular-nums">
+              {firstShown.toLocaleString()}–{lastShown.toLocaleString()} of {props.total.toLocaleString()}
+            </span>
+            <label className="text-muted-foreground flex items-center gap-1.5">
+              Rows
+              <Select
+                value={String(props.pageSize)}
+                onValueChange={(v) => {
+                  router.push(hrefFor(props.selection, props.view, filter, { size: Number(v) }), {
+                    scroll: false,
+                  });
+                }}
+              >
+                <SelectTrigger size="sm" className="h-7 w-[72px] text-[12px]" aria-label="Rows per page">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZES.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="ml-auto flex items-center gap-1">
+              {(
+                [
+                  [1, "First page", ChevronsLeft, props.page <= 1],
+                  [props.page - 1, "Previous page", ChevronLeft, props.page <= 1],
+                ] as const
+              ).map(([p, label, Icon, off]) => (
+                <Link
+                  key={label}
+                  href={hrefFor(props.selection, props.view, filter, { page: p })}
+                  scroll={false}
+                  aria-label={label}
+                  aria-disabled={off}
+                  className={cn(
+                    "hover:bg-muted rounded-md border p-1.5",
+                    off && "pointer-events-none opacity-40",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                </Link>
+              ))}
+              <form
+                className="text-muted-foreground flex items-center gap-1.5 px-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const n = Math.min(Math.max(Math.floor(Number(pageInput)) || 1, 1), pages);
+                  router.push(hrefFor(props.selection, props.view, filter, { page: n }), { scroll: false });
+                }}
+              >
+                Page
+                <Input
+                  value={pageInput}
+                  onChange={(e) => {
+                    setPageInput(e.target.value.replace(/[^0-9]/g, ""));
+                  }}
+                  inputMode="numeric"
+                  aria-label="Page number"
+                  className="h-7 w-14 px-2 text-center text-[12px] tabular-nums"
+                />
+                of {pages.toLocaleString()}
+              </form>
+              {(
+                [
+                  [props.page + 1, "Next page", ChevronRight, props.page >= pages],
+                  [pages, "Last page", ChevronsRight, props.page >= pages],
+                ] as const
+              ).map(([p, label, Icon, off]) => (
+                <Link
+                  key={label}
+                  href={hrefFor(props.selection, props.view, filter, { page: p })}
+                  scroll={false}
+                  aria-label={label}
+                  aria-disabled={off}
+                  className={cn(
+                    "hover:bg-muted rounded-md border p-1.5",
+                    off && "pointer-events-none opacity-40",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                </Link>
+              ))}
+            </div>
+          </nav>
+        )}
       </section>
 
       <BulkReviewDialog

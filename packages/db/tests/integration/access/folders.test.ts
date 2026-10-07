@@ -7,7 +7,9 @@ import {
   createFolder,
   createOrganization,
   createProject,
+  assetNeighbours,
   deleteFolder,
+  pageAssets,
   ensureFolderPath,
   folderTree,
   listAssets,
@@ -130,6 +132,50 @@ describe("folders", () => {
     expect(await moveAssets(scope, project.id, [asset.id], null)).toBe(1);
     await deleteFolder(scope, project.id, f.id);
     expect((await folderTree(scope, project.id)).roots).toEqual([]);
+  });
+
+  it("deletes a folder with its sub-folders, files and labels when asked", async () => {
+    const { scope, project } = await setup();
+    const top = await ensureFolderPath(scope, project.id, "scans/2026");
+    const parent = (await folderTree(scope, project.id)).roots[0];
+    const { asset } = await registerAsset(scope, { projectId: project.id, ...file("9", top?.id ?? null) });
+    await registerAsset(scope, { projectId: project.id, ...file("10", null) });
+    await saveAnnotation(scope, asset.id, { tags: [], regions: [] }, 0);
+    if (!parent) throw new Error("no folder");
+
+    const result = await deleteFolder(scope, project.id, parent.id, { withFiles: true });
+    expect(result.deletedFiles).toBe(1);
+    expect(result.orphanKeys).toEqual([`k/9`]);
+    expect((await folderTree(scope, project.id)).roots).toEqual([]);
+    expect((await listAssets(scope, project.id)).map((a) => a.sha256)).toEqual(["10"]);
+  });
+
+  it("pages and filters files in the database", async () => {
+    const { scope, project } = await setup();
+    for (const n of ["p1", "p2", "p3", "p4", "p5"]) {
+      await registerAsset(scope, { projectId: project.id, ...file(n, null) });
+    }
+    const page2 = await pageAssets(scope, project.id, { filter: "all", page: 2, pageSize: 2 });
+    expect(page2.rows.map((r) => r.sha256)).toEqual(["p3", "p4"]);
+    expect([page2.total, page2.counts.all, page2.counts.ocr]).toEqual([5, 5, 5]);
+    const named = await pageAssets(scope, project.id, {
+      filter: "all",
+      page: 1,
+      pageSize: 10,
+      search: "P4",
+      sort: "name-desc",
+    });
+    expect(named.rows.map((r) => r.sha256)).toEqual(["p4"]);
+    const desc = await pageAssets(scope, project.id, {
+      filter: "all",
+      page: 1,
+      pageSize: 2,
+      sort: "name-desc",
+    });
+    expect(desc.rows.map((r) => r.sha256)).toEqual(["p5", "p4"]);
+    const around = await assetNeighbours(scope, project.id, page2.rows[0]?.id ?? "", undefined, 1);
+    expect(around.rows.map((r) => r.sha256)).toEqual(["p2", "p3", "p4"]);
+    expect([around.index, around.total]).toEqual([1, 5]);
   });
 
   it("exports only the chosen folders", async () => {

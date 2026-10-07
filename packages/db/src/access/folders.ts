@@ -1,5 +1,6 @@
 import { and, asc, count, eq, inArray, like, or, sql } from "drizzle-orm";
 import { assets, folders, projects } from "../schema/index.js";
+import { deleteAssets } from "./assets.js";
 import { AccessError } from "./errors.js";
 import { requireRole, type OrgScope } from "./scope.js";
 
@@ -156,7 +157,17 @@ export async function renameFolder(
 }
 
 /** Deletes a folder only when it and its sub-folders hold no files. */
-export async function deleteFolder(scope: OrgScope, projectId: string, folderId: string): Promise<void> {
+/**
+ * Deletes a folder and its sub-folders. With `withFiles`, the files inside (and their labels,
+ * reviews and predictions) go too and their now-unused storage keys are returned; without it, a
+ * folder that still holds files is refused.
+ */
+export async function deleteFolder(
+  scope: OrgScope,
+  projectId: string,
+  folderId: string,
+  opts: { withFiles?: boolean } = {},
+): Promise<{ deletedFiles: number; orphanKeys: string[] }> {
   requireRole(scope, "manager");
   const folder = await folderInScope(scope, projectId, folderId);
   const subtree = await scope.db
@@ -177,8 +188,35 @@ export async function deleteFolder(scope: OrgScope, projectId: string, folderId:
         subtree.map((f) => f.id),
       ),
     );
-  if ((row?.n ?? 0) > 0) throw new AccessError("CONFLICT", "Move or delete the files in this folder first.");
-  await scope.db.delete(folders).where(eq(folders.id, folderId));
+  let result = { deletedFiles: 0, orphanKeys: [] as string[] };
+  if ((row?.n ?? 0) > 0) {
+    if (!opts.withFiles) throw new AccessError("CONFLICT", "Move or delete the files in this folder first.");
+    const inside = await scope.db
+      .select({ id: assets.id })
+      .from(assets)
+      .where(
+        inArray(
+          assets.folderId,
+          subtree.map((f) => f.id),
+        ),
+      );
+    const r = await deleteAssets(
+      scope,
+      projectId,
+      inside.map((a) => a.id),
+    );
+    result = { deletedFiles: r.deleted, orphanKeys: r.orphanKeys };
+  }
+  // The folder and every folder under it.
+  await scope.db
+    .delete(folders)
+    .where(
+      and(
+        eq(folders.projectId, projectId),
+        or(eq(folders.id, folderId), like(folders.path, `${folder.path}/%`)),
+      ),
+    );
+  return result;
 }
 
 /** Moves files (by id) into a folder, or to the project root when `folderId` is null. */

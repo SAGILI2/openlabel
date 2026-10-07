@@ -1,0 +1,23 @@
+# NVIDIA GPU for the OCR service. Needs the NVIDIA driver and Docker GPU support
+# (Docker Desktop on Windows with WSL 2, or nvidia-container-toolkit on Linux).
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+services:
+  ocr:
+    build:
+      context: services/ocr-doctr
+      dockerfile: Dockerfile.gpu
+    image: openlabel-ocr-doctr:gpu
+    environment:
+      OCR_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # The GPU finishes a page in ~0.2 s, so let each worker keep more pages in flight.
+  worker:
+    environment:
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}

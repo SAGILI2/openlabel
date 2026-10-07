@@ -43,22 +43,39 @@ export async function itemsFromDrop(dataTransfer: DataTransfer): Promise<UploadI
     }
   }
   for (const entry of entries) await walk(entry, "");
-  return out;
+  return insideOneFolder(out);
 }
 
 /** Files from an <input type=file>, with folder paths when the folder picker was used. */
 export function itemsFromInput(files: FileList | null): UploadItem[] {
-  return Array.from(files ?? []).map((file) => ({ file, relativePath: file.webkitRelativePath || "" }));
+  return insideOneFolder(
+    Array.from(files ?? []).map((file) => ({ file, relativePath: file.webkitRelativePath || "" })),
+  );
 }
 
-/** Uploads images a few at a time into a project (and optional folder), reporting progress. */
+/**
+ * Picking or dropping one folder uploads what's inside it: `dataset/Axis Bank/a.jpg` lands in
+ * `Axis Bank/`, not in a new `dataset/` wrapper. Several folders dropped together keep their names.
+ */
+export function insideOneFolder(items: UploadItem[]): UploadItem[] {
+  const tops = new Set(items.map((i) => (i.relativePath.includes("/") ? i.relativePath.split("/")[0] : "")));
+  if (tops.size !== 1 || tops.has("")) return items;
+  return items.map((i) => ({ ...i, relativePath: i.relativePath.split("/").slice(1).join("/") }));
+}
+
+/**
+ * Uploads images a few at a time into a project (and optional folder). Built for very large
+ * folders: an index walks the list instead of shifting it, progress reaches React at most a few
+ * times a second, failures keep only the first 50 names, and `signal` stops it cleanly.
+ */
 export async function uploadAll(
   projectId: string,
   folderId: string | null,
   items: UploadItem[],
   onProgress: (p: UploadProgress) => void,
-  parallel = 3,
+  opts: { parallel?: number; signal?: AbortSignal } = {},
 ): Promise<UploadProgress> {
+  const parallel = opts.parallel ?? 6;
   const images = items.filter((i) => ACCEPTED_TYPES.includes(i.file.type));
   const skipped = items.length - images.length;
   const state: UploadProgress = {
@@ -66,30 +83,53 @@ export async function uploadAll(
     done: 0,
     failed: skipped > 0 ? [{ name: `${String(skipped)} file(s)`, reason: "not a supported image type" }] : [],
   };
-  onProgress({ ...state });
-  const queue = [...images];
+  let failedCount = state.failed.length;
+  let lastReport = 0;
+  const report = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastReport < 250) return;
+    lastReport = now;
+    onProgress({ ...state, failed: [...state.failed] });
+  };
+  report(true);
+  let next = 0;
   await Promise.all(
-    Array.from({ length: Math.min(parallel, queue.length) }, async () => {
-      for (let item = queue.shift(); item; item = queue.shift()) {
+    Array.from({ length: Math.min(parallel, images.length) }, async () => {
+      while (next < images.length && !opts.signal?.aborted) {
+        const item = images[next++];
+        if (!item) break;
         const form = new FormData();
         form.append("file", item.file);
         if (folderId) form.append("folderId", folderId);
         if (item.relativePath) form.append("relativePath", item.relativePath);
         let reason: string | null = null;
         try {
-          const res = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: form });
+          const res = await fetch(`/api/projects/${projectId}/assets`, {
+            method: "POST",
+            body: form,
+            ...(opts.signal ? { signal: opts.signal } : {}),
+          });
           if (!res.ok) {
             const body = (await res.json().catch(() => null)) as { detail?: string } | null;
             reason = body?.detail ?? `Upload failed (${String(res.status)})`;
           }
         } catch {
-          reason = "Network error";
+          reason = opts.signal?.aborted ? null : "Network error";
         }
+        if (opts.signal?.aborted) break;
         state.done += 1;
-        if (reason) state.failed.push({ name: item.relativePath || item.file.name, reason });
-        onProgress({ ...state, failed: [...state.failed] });
+        if (reason) {
+          failedCount += 1;
+          if (state.failed.length < 50)
+            state.failed.push({ name: item.relativePath || item.file.name, reason });
+        }
+        report();
       }
     }),
   );
+  if (failedCount > state.failed.length) {
+    state.failed.push({ name: `${String(failedCount - state.failed.length)} more`, reason: "also failed" });
+  }
+  report(true);
   return state;
 }
