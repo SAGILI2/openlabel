@@ -20,6 +20,8 @@ import {
   setRequestedReviewers,
   setReviewRules,
   submitForReview,
+  submitManyForReview,
+  reviewManyAssets,
   subtreeFolderIds,
 } from "@openlabel/db";
 import { EXPORTERS } from "@openlabel/exporters";
@@ -201,6 +203,65 @@ export async function submitForReviewAction(assetId: string, reviewerIds: string
     await submitForReview(scope, z.uuid().parse(assetId), reviewerIdsSchema.parse(reviewerIds));
     refresh();
     return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Sends the chosen pages for review in one go; returns how many went and why others didn't. */
+export async function submitManyForReviewAction(
+  projectId: string,
+  assetIds: string[],
+  reviewerIds: string[],
+): Promise<ActionResult<{ sent: number; skipped: number; reasons: string[] }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const result = await submitManyForReview(
+      scope,
+      z.uuid().parse(projectId),
+      z.array(z.uuid()).max(5000).parse(assetIds),
+      reviewerIdsSchema.parse(reviewerIds),
+    );
+    refresh();
+    return {
+      ok: true,
+      data: {
+        sent: result.sent,
+        skipped: result.skipped.length,
+        reasons: [...new Set(result.skipped.map((s) => s.reason))],
+      },
+    };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Approves or requests changes on many pages at once. */
+export async function reviewManyAction(
+  projectId: string,
+  assetIds: string[],
+  input: { decision: string; body: string },
+): Promise<ActionResult<{ done: number; skipped: number; reasons: string[] }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const result = await reviewManyAssets(
+      scope,
+      z.uuid().parse(projectId),
+      z.array(z.uuid()).max(5000).parse(assetIds),
+      {
+        decision: z.enum(["approve", "request_changes"]).parse(input.decision),
+        body: z.string().max(4000).parse(input.body),
+      },
+    );
+    refresh();
+    return {
+      ok: true,
+      data: {
+        done: result.done,
+        skipped: result.skipped.length,
+        reasons: [...new Set(result.skipped.map((s) => s.reason))],
+      },
+    };
   } catch (err) {
     return fail(err);
   }

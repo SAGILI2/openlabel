@@ -1,4 +1,11 @@
-import { listAssets, subtreeFolderIds } from "@openlabel/db";
+import {
+  getReviewRules,
+  listAssets,
+  listEligibleReviewers,
+  myReviewQueue,
+  REVIEWER_ROLES,
+  subtreeFolderIds,
+} from "@openlabel/db";
 import { FileBrowser, type FolderSelection } from "@/features/browser";
 import { AutoRefresh } from "@/features/projects";
 import { folderPaths, loadProject } from "@/server/projects/load";
@@ -8,7 +15,7 @@ export default async function ProjectFilesPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ folder?: string; view?: string }>;
+  searchParams: Promise<{ folder?: string; view?: string; filter?: string }>;
 }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
   const { scope, project, tree, counts, canEdit } = await loadProject(slug);
@@ -16,15 +23,20 @@ export default async function ProjectFilesPage({
 
   const selection: FolderSelection =
     query.folder === "root" ? "root" : query.folder && paths.has(query.folder) ? query.folder : "all";
-  const files = await listAssets(
-    scope,
-    project.id,
-    selection === "all"
-      ? undefined
-      : selection === "root"
-        ? null
-        : await subtreeFolderIds(scope, project.id, selection),
-  );
+  const [files, reviewers, rules, queue] = await Promise.all([
+    listAssets(
+      scope,
+      project.id,
+      selection === "all"
+        ? undefined
+        : selection === "root"
+          ? null
+          : await subtreeFolderIds(scope, project.id, selection),
+    ),
+    listEligibleReviewers(scope),
+    getReviewRules(scope, project.id),
+    myReviewQueue(scope, project.id),
+  ]);
   const folderName =
     selection === "all"
       ? "All files"
@@ -44,6 +56,14 @@ export default async function ProjectFilesPage({
         totalCount={tree.totalCount}
         rootFileCount={tree.rootFileCount}
         canEdit={canEdit}
+        canSubmit={scope.role !== "viewer"}
+        reviewers={reviewers
+          .filter((r) => r.userId !== scope.userId || rules.allowSelfApproval)
+          .map((r) => ({ userId: r.userId, name: r.name, email: r.email }))}
+        defaultReviewerIds={rules.defaultReviewerIds}
+        canReview={REVIEWER_ROLES.includes(scope.role)}
+        myQueueIds={queue.map((q) => q.assetId)}
+        initialFilter={query.filter === "mine" || query.filter === "review" ? query.filter : "all"}
         view={query.view === "grid" ? "grid" : "list"}
         files={files.map((a) => ({
           id: a.id,

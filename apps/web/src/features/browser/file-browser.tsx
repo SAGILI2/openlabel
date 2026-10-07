@@ -1,6 +1,7 @@
 "use client";
 import {
   CheckCircle2,
+  ChevronDown,
   Circle,
   CircleDashed,
   Eye,
@@ -10,6 +11,7 @@ import {
   List,
   Loader2,
   Play,
+  Send,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -28,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { BulkReviewDialog, SendForReviewDialog, type ReviewerOption } from "@/features/review";
 import { cn } from "@/lib/utils";
 import {
   createFolderAction,
@@ -47,17 +50,18 @@ export interface BrowserFile {
   folderPath: string | null;
 }
 
-type Filter = "all" | "todo" | "review" | "done" | "ocr";
+type Filter = "all" | "mine" | "todo" | "review" | "done" | "ocr";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
+  { id: "mine", label: "Waiting for me" },
   { id: "todo", label: "To do" },
   { id: "review", label: "In review" },
   { id: "done", label: "Approved" },
   { id: "ocr", label: "OCR running" },
 ];
 
-function bucket(status: BrowserFile["status"]): Exclude<Filter, "all"> {
+function bucket(status: BrowserFile["status"]): Exclude<Filter, "all" | "mine"> {
   if (status === "approved") return "done";
   if (status === "submitted") return "review";
   if (status === "new" || status === "prelabelling") return "ocr";
@@ -107,18 +111,33 @@ interface Props {
   rootFileCount: number;
   files: BrowserFile[];
   canEdit: boolean;
+  /** Everyone except viewers can send pages for review. */
+  canSubmit: boolean;
+  reviewers: ReviewerOption[];
+  defaultReviewerIds: string[];
+  /** Reviewer roles and up can approve or request changes. */
+  canReview: boolean;
+  /** Pages in this project waiting for the signed-in user's review. */
+  myQueueIds: string[];
+  initialFilter: "all" | "mine" | "review";
   view: "list" | "grid";
 }
+
+/** Saved labels, not yet in review or approved. */
+const READY_FOR_REVIEW = new Set<BrowserFile["status"]>(["in_progress", "rejected"]);
 
 /** Project file browser: folder tree, file list/grid, selection, moving and uploading. */
 export function FileBrowser(props: Props) {
   const router = useRouter();
   const dialogs = useDialogs();
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>(props.initialFilter);
+  const [bulkDecision, setBulkDecision] = useState<"approve" | "request_changes" | null>(null);
+  const mine = useMemo(() => new Set(props.myQueueIds), [props.myQueueIds]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [dropping, setDropping] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -135,14 +154,20 @@ export function FileBrowser(props: Props) {
     `${base}/label/${id}${props.selection === "all" ? "" : `?folder=${props.selection}`}`;
 
   const visible = useMemo(
-    () => props.files.filter((f) => filter === "all" || bucket(f.status) === filter),
-    [props.files, filter],
+    () =>
+      props.files.filter((f) =>
+        filter === "all" ? true : filter === "mine" ? mine.has(f.id) : bucket(f.status) === filter,
+      ),
+    [props.files, filter, mine],
   );
   const counts = useMemo(() => {
-    const c = { all: props.files.length, todo: 0, review: 0, done: 0, ocr: 0 };
-    for (const f of props.files) c[bucket(f.status)] += 1;
+    const c = { all: props.files.length, mine: 0, todo: 0, review: 0, done: 0, ocr: 0 };
+    for (const f of props.files) {
+      c[bucket(f.status)] += 1;
+      if (mine.has(f.id)) c.mine += 1;
+    }
     return c;
-  }, [props.files]);
+  }, [props.files, mine]);
   const nextToLabel = props.files.find((f) => bucket(f.status) === "todo");
   const targetFolderId = props.selection === "all" || props.selection === "root" ? null : props.selection;
 
@@ -249,6 +274,20 @@ export function FileBrowser(props: Props) {
   };
   const allChecked = visible.length > 0 && visible.every((f) => selected.has(f.id));
 
+  // With a selection, send those pages; otherwise every ready page in this folder view.
+  const sendIds =
+    selected.size > 0
+      ? [...selected]
+      : props.files.filter((f) => READY_FOR_REVIEW.has(f.status)).map((f) => f.id);
+  const reviewIds = (selected.size > 0 ? props.files.filter((f) => selected.has(f.id)) : visible)
+    .filter((f) => f.status === "submitted")
+    .map((f) => f.id);
+  const reviewScope = selected.size > 0 || filter === "mine" || filter === "review";
+  const sendLabel =
+    selected.size > 0
+      ? `${String(selected.size)} selected ${selected.size === 1 ? "page" : "pages"}`
+      : `${String(sendIds.length)} ${sendIds.length === 1 ? "page" : "pages"} with saved labels in ${props.folderName}`;
+
   return (
     <div
       className="relative grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)]"
@@ -312,7 +351,7 @@ export function FileBrowser(props: Props) {
           </Select>
           <h2 className="hidden truncate text-[14px] font-semibold lg:block">{props.folderName}</h2>
           <div className="bg-muted flex rounded-md p-0.5" role="tablist" aria-label="Filter">
-            {FILTERS.map((f) => (
+            {FILTERS.filter((f) => f.id !== "mine" || props.canReview).map((f) => (
               <button
                 key={f.id}
                 type="button"
@@ -331,6 +370,43 @@ export function FileBrowser(props: Props) {
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {props.canReview && reviewScope && reviewIds.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm">
+                    <CheckCircle2 aria-hidden /> Review {reviewIds.length}
+                    <ChevronDown className="opacity-70" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setBulkDecision("approve");
+                    }}
+                  >
+                    <CheckCircle2 className="text-success" aria-hidden /> Approve {reviewIds.length}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setBulkDecision("request_changes");
+                    }}
+                  >
+                    <XCircle className="text-destructive" aria-hidden /> Request changes
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {props.canSubmit && sendIds.length > 0 && !(filter === "mine" || filter === "review") && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setSending(true);
+                }}
+              >
+                <Send aria-hidden />
+                {selected.size > 0 ? `Send ${String(selected.size)} for review` : "Send for review"}
+              </Button>
+            )}
             {selected.size > 0 && props.canEdit && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -478,7 +554,11 @@ export function FileBrowser(props: Props) {
             <div className="text-muted-foreground grid place-items-center gap-2 px-6 py-20 text-center">
               <CircleDashed className="size-6" strokeWidth={1.5} />
               <p className="text-foreground font-medium">
-                {props.files.length === 0 ? "This folder is empty" : "Nothing matches this filter"}
+                {props.files.length === 0
+                  ? "This folder is empty"
+                  : filter === "mine"
+                    ? "Nothing waiting for your review"
+                    : "Nothing matches this filter"}
               </p>
               {props.files.length === 0 && props.canEdit && (
                 <p className="text-[13px]">Drop images or a folder anywhere here, or use Upload.</p>
@@ -600,6 +680,33 @@ export function FileBrowser(props: Props) {
           )}
         </div>
       </section>
+
+      <BulkReviewDialog
+        decision={bulkDecision}
+        onClose={() => {
+          setBulkDecision(null);
+        }}
+        projectId={props.projectId}
+        assetIds={reviewIds}
+        onDone={(text) => {
+          setSelected(new Set());
+          flash(text);
+        }}
+      />
+
+      <SendForReviewDialog
+        open={sending}
+        onOpenChange={setSending}
+        projectId={props.projectId}
+        assetIds={sendIds}
+        scopeLabel={sendLabel}
+        reviewers={props.reviewers}
+        defaultReviewerIds={props.defaultReviewerIds}
+        onDone={(text) => {
+          setSelected(new Set());
+          flash(text);
+        }}
+      />
 
       {dropping && (
         <div className="bg-brand/10 border-brand pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-xl border-2 border-dashed">
