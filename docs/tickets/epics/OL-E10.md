@@ -1,7 +1,7 @@
 ---
 key: OL-E10
 type: epic
-title: Additional modalities
+title: Task types beyond OCR
 status: todo
 release: R2
 created: 2026-10-07
@@ -10,11 +10,13 @@ updated: 2026-10-07
 
 ## Description
 
-LLM data, audio, vision breadth, video, text/NLP plugins.
+Classification, object detection, segmentation, speech-to-text, NER, video and LLM data — each a task-type plugin with labelling, evaluation and export.
 
 ## Issues
 
-- (to be broken down)
+- OL-41: Classification task: labelling and evaluation
+- OL-42: Object detection task: labelling and evaluation
+- OL-43: Speech-to-text task: waveform labelling and evaluation
 
 ## Activity
 

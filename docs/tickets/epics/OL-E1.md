@@ -14,6 +14,7 @@ Licence, repository layout, tooling, CI quality gates, contribution files, Docke
 
 ## Issues
 
+- OL-44: Scalable job execution: chunking, inference pools, autoscaling
 - OL-1: Repository foundation and open-source files
 - OL-2: Ticket tracker in the repository
 - OL-3: Workspace tooling: pnpm, Turborepo, TypeScript, lint, format

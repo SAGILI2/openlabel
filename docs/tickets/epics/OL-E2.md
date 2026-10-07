@@ -14,6 +14,7 @@ Organisations, users, authentication, roles and permissions, projects, audit log
 
 ## Issues
 
+- OL-39: Task-type plugin framework
 - OL-8: Authentication: email/password, sessions, MFA
 - OL-9: Organisations, memberships and invitations
 - OL-10: Roles and permissions (RBAC)

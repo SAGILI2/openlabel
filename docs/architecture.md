@@ -439,9 +439,21 @@ Every launcher implements one interface: `submit(snapshot, recipe) → job`, plu
 - **Dataset health:** class balance, label distribution per split, train/test leakage check, missing-label report.
 - **Label-error detection:** confident-learning methods flag annotations the model strongly disagrees with, sent for re-review.
 
-## 12. Evaluation: gauging accuracy of any OCR system
+## 12. Evaluation: gauging accuracy of any model
 
-The verified annotations are a **benchmark**. Any OCR system (our own models, open-source engines, or paid cloud APIs) can be run against a frozen benchmark snapshot, its response converted to our format by an adapter, and scored with the same metrics. The same design extends to ASR, detection and LLM evaluation.
+The verified annotations are a **benchmark**. Any model for any task type — classifier, object detector, OCR engine, speech recogniser, NER tagger, LLM — can be run against a frozen benchmark snapshot, its response converted to the task's canonical prediction by an adapter, and scored with that task's standard metrics. The core (benchmarks, runs, leaderboard, slices, error explorer, regression gate) is task-agnostic; each task type plugin supplies its prediction contract, matcher and metrics ([ADR-0004](adr/0004-task-types-for-labelling-and-evaluation.md)).
+
+| Task type        | Matcher                                    | Metrics                                                            |
+| ---------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| Classification   | per item                                   | accuracy, macro/micro P/R/F1, confusion matrix, top-k, calibration |
+| Object detection | Hungarian on box IoU per class             | mAP@0.5, mAP@0.5:0.95 (COCO protocol), per-class AP                |
+| Segmentation     | mask overlap                               | mean IoU, Dice, boundary F1                                        |
+| OCR              | §12.2 below                                | §12.3 below                                                        |
+| Speech-to-text   | time-aligned segments, then word alignment | WER, CER, S/D/I counts, diarization error rate                     |
+| NER / spans      | span overlap                               | entity P/R/F1, strict and partial                                  |
+| LLM / generative | per prompt                                 | reference match, rubric scores, judge–human agreement, win rate    |
+
+OCR is the most detailed plugin and is described in full below as the worked example.
 
 ```mermaid
 ---
@@ -554,6 +566,18 @@ Every metric comes with a **confidence interval** (bootstrap over pages), so sma
 ### 12.6 Data model additions
 
 `BENCHMARK` (a frozen snapshot marked for evaluation, with its normalisation profile) → `EVAL_RUN` (benchmark × engine adapter × engine version × params) → `EVAL_RESULT` (raw + canonical response per asset) → `EVAL_METRIC` (metric, slice, value, confidence interval). `ENGINE` records adapter type, endpoint, version and cost model. Runs are immutable and reproducible from the stored raw responses.
+
+## 12.7 Scaling
+
+One server cannot run models over large datasets while serving the UI, so the system is split into tiers that scale independently ([ADR-0005](adr/0005-scaling.md)):
+
+- **Web/API:** stateless replicas behind a load balancer; never runs a model.
+- **Workers:** stateless replicas; chunked, idempotent, resumable jobs; per-engine rate limits and cost caps.
+- **Inference servers:** separate CPU/GPU pools per model behind the `/predict` contract (Triton, vLLM, TorchServe, BentoML or a paid API), autoscaled on queue depth.
+- **Postgres:** vertical, then read replicas; prediction and eval-result tables partitioned.
+- **Object storage:** all media and raw responses, accessed by signed URLs.
+
+Deployment ladder: single machine (Compose) → Compose + remote GPU inference → Kubernetes (Helm, KEDA autoscaling).
 
 ## 13. Non-text content, overlaps and image conditions
 
