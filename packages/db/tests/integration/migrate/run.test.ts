@@ -66,6 +66,7 @@ describe("runMigrations", () => {
         "accounts",
         "assets",
         "audit_events",
+        "invitations",
         "memberships",
         "organizations",
         "projects",

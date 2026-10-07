@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { NavRail } from "@/components/shell";
-import { requireSession } from "@/server/auth";
+import { redirect } from "next/navigation";
+import { getOrgContext } from "@/server/orgs";
 
 export const dynamic = "force-dynamic";
 
-/** Authenticated application frame: icon rail + scrollable page area. Redirects to sign-in. */
+/** App frame: icon rail + page. Requires sign-in and an organisation (else onboarding). */
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  await requireSession();
+  const { active } = await getOrgContext();
+  if (!active) redirect("/onboarding");
   return (
     <div className="flex h-dvh overflow-hidden">
       <NavRail />

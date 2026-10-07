@@ -10,7 +10,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { id, timestamps } from "./columns.js";
-import { users } from "./identity.js";
+import { organizations, users } from "./identity.js";
 
 /**
  * Tables used by the authentication library (Better Auth). Column sets follow its model
@@ -29,6 +29,8 @@ export const sessions = pgTable(
     expiresAt: timestamp({ withTimezone: true }).notNull(),
     ipAddress: text(),
     userAgent: text(),
+    /** Organisation the user is working in; re-checked against memberships on every request. */
+    activeOrgId: uuid().references(() => organizations.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (t) => [uniqueIndex("sessions_token_uq").on(t.token), index("sessions_user_idx").on(t.userId)],

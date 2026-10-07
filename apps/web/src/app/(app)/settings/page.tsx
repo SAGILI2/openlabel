@@ -13,11 +13,11 @@ const SECTIONS = [
     ready: true,
   },
   {
-    href: "/settings",
+    href: "/settings/members",
     icon: Building2,
-    title: "Organisation",
-    description: "Name, members and invitations. Arrives with OL-9.",
-    ready: false,
+    title: "Members",
+    description: "Invite people, change roles and remove access.",
+    ready: true,
   },
   {
     href: "/settings",
