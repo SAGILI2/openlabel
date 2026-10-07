@@ -1,39 +1,8 @@
 import { LocalTime } from "@/components/time";
 
-export interface ActivityView {
-  id: string;
-  action: string;
-  actorName: string | null;
-  details: Record<string, unknown>;
-  occurredAt: string;
-}
+import { describeActivity, type ActivityView } from "./describe-activity";
 
-function str(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-
-/** Plain-language sentence for an audit event. Unknown actions fall back to the raw verb. */
-export function describeActivity(e: ActivityView): string {
-  const who = e.actorName ?? "Someone";
-  switch (e.action) {
-    case "organization.created":
-      return `${who} created the organisation`;
-    case "invitation.created":
-      return `${who} invited ${str(e.details.email)} as ${str(e.details.role)}`;
-    case "invitation.revoked":
-      return `${who} revoked an invitation`;
-    case "invitation.accepted":
-      return `${who} joined as ${str(e.details.role)}`;
-    case "membership.role_changed":
-      return `${who} changed a role from ${str(e.details.from)} to ${str(e.details.to)}`;
-    case "membership.removed":
-      return `${who} removed a member`;
-    case "membership.left":
-      return `${who} left the organisation`;
-    default:
-      return `${who}: ${e.action}`;
-  }
-}
+export { describeActivity, type ActivityView };
 
 /** Recent audit events for the organisation. */
 export function ActivityList({ events }: { events: ActivityView[] }) {

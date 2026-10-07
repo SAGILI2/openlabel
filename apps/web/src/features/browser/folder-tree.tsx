@@ -243,7 +243,9 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
 /** Project folder tree: all files, unfiled files, then nested folders. Files can be dropped on folders. */
 export function FolderTree(props: Props) {
   return (
-    <nav aria-label="Folders" className="grid gap-0.5">
+    // minmax(0,1fr): a long folder name truncates instead of widening the column and pushing
+    // the counts out of view.
+    <nav aria-label="Folders" className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
       <Row
         href={props.hrefFor("all")}
         icon={<Layers className="text-muted-foreground size-4 shrink-0" strokeWidth={1.75} />}
