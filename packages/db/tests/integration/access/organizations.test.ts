@@ -8,6 +8,7 @@ import {
   createInvitation,
   createOrganization,
   listMembers,
+  listRecentAudit,
   listMyOrganizations,
   listPendingInvitations,
   previewInvitation,
@@ -273,5 +274,22 @@ describe("roles and removal", () => {
       ["ada@x.test", "admin"],
       ["cy@x.test", "owner"],
     ]);
+  });
+});
+
+describe("audit log", () => {
+  it("shows an organisation only its own events, newest first, to managers and above", async () => {
+    const { ada, bob, acme, bobco } = await twoOrgs();
+    const owner = await resolveOrgScope(conn.db, ada.id, acme.id);
+    await createInvitation(owner, { email: "c@x.test", role: "viewer" });
+    expect((await listRecentAudit(owner)).map((e) => e.action)).toEqual([
+      "invitation.created",
+      "organization.created",
+    ]);
+    expect(
+      (await listRecentAudit(await resolveOrgScope(conn.db, bob.id, bobco.id))).map((e) => e.action),
+    ).toEqual(["organization.created"]);
+    const lab = await join(ada.id, acme.id, "lab@x.test", "labeller");
+    await expectCode(listRecentAudit(await resolveOrgScope(conn.db, lab.id, acme.id)), "FORBIDDEN");
   });
 });

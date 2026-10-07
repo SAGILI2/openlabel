@@ -25,3 +25,4 @@ export {
   type PendingInvitation,
 } from "./invitations.js";
 export { setActiveOrganization } from "./session-org.js";
+export { listRecentAudit, type AuditRow } from "./audit.js";

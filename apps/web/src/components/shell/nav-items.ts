@@ -9,6 +9,11 @@ export interface NavItem {
   shortcut: string;
 }
 
+/** Whether `href` is the current section (the overview matches only itself). */
+export function isActive(pathname: string, href: string): boolean {
+  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+}
+
 /** Primary navigation, in the order of the data workflow. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { href: "/", label: "Overview", icon: Gauge, shortcut: "o" },

@@ -38,7 +38,7 @@ export function InviteForm({ assignable }: { assignable: OrgRole[] }) {
   }
 
   return (
-    <div className="grid gap-4">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
       <form onSubmit={onSubmit} className="grid gap-3 sm:grid-cols-[1fr_180px_auto] sm:items-end" noValidate>
         <div className="grid gap-1.5">
           <Label htmlFor="invite-email">Email</Label>
@@ -82,12 +82,15 @@ export function InviteForm({ assignable }: { assignable: OrgRole[] }) {
       <p className="text-muted-foreground text-[12px]">{ROLES.find((r) => r.value === role)?.description}</p>
       <FormError message={error} />
       {created && (
-        <div role="status" className="bg-accent text-accent-foreground grid gap-2 rounded-md p-3 text-[13px]">
-          <p className="flex items-center gap-2 font-medium">
-            <Link2 className="size-4" aria-hidden />
+        <div
+          role="status"
+          className="bg-accent text-accent-foreground grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-md p-3 text-[13px]"
+        >
+          <p className="flex items-start gap-2 font-medium">
+            <Link2 className="mt-0.5 size-4 shrink-0" aria-hidden />
             Invitation created for {created.email}. Share this link; it works once and expires in 7 days.
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <code className="bg-card text-foreground min-w-0 flex-1 truncate rounded border px-2 py-1.5 font-mono text-[12px]">
               {created.link}
             </code>

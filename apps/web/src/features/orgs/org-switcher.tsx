@@ -41,7 +41,9 @@ export function OrgSwitcher({ orgs, activeId }: { orgs: SwitcherOrg[]; activeId:
         aria-label={`Organisation: ${active.name}. Switch organisation`}
       >
         <Monogram name={active.name} />
-        <span className="max-w-[180px] truncate text-[14px] font-semibold">{active.name}</span>
+        <span className="max-w-[110px] truncate text-[14px] font-semibold sm:max-w-[180px]">
+          {active.name}
+        </span>
         <ChevronsUpDown className="text-muted-foreground size-3.5" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">

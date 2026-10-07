@@ -141,3 +141,12 @@
     }
   }
 }
+
+/* Scrolls with wheel, trackpad, touch and keyboard, but draws no scrollbar. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

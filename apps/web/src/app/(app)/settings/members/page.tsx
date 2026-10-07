@@ -1,6 +1,13 @@
-import { canAssignRole, listMembers, listPendingInvitations, type OrgRole } from "@openlabel/db";
-import { TopBar } from "@/components/shell";
-import { InviteForm, MembersTable, ROLES } from "@/features/orgs";
+import {
+  canAssignRole,
+  listMembers,
+  listPendingInvitations,
+  listRecentAudit,
+  type OrgRole,
+} from "@openlabel/db";
+import { PageBody, TopBar } from "@/components/shell";
+import { SettingsNav } from "@/features/settings";
+import { ActivityList, InvitationsTable, InviteDialog, MembersTable, ROLES } from "@/features/orgs";
 import { requireOrgScope } from "@/server/orgs";
 
 export const metadata = { title: "Members" };
@@ -11,44 +18,55 @@ const INVITE: OrgRole[] = ["owner", "admin", "manager"];
 export default async function MembersPage() {
   const { scope, org } = await requireOrgScope();
   const canInvite = INVITE.includes(scope.role);
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, activity] = await Promise.all([
     listMembers(scope),
     canInvite ? listPendingInvitations(scope) : Promise.resolve([]),
+    canInvite ? listRecentAudit(scope, 15) : Promise.resolve([]),
   ]);
   const assignable = ROLES.map((r) => r.value).filter((r) => canAssignRole(scope.role, r));
 
   return (
     <>
       <TopBar title="Members" />
-      <div className="mx-auto grid w-full max-w-[880px] gap-8 px-6 py-8">
-        <div>
-          <h2 className="text-[20px] font-semibold tracking-tight">{org.name}</h2>
-          <p className="text-muted-foreground mt-1">
-            {members.length} {members.length === 1 ? "member" : "members"}. Only members can see this
-            organisation&apos;s projects and data.
-          </p>
+      <SettingsNav variant="tabs" />
+      <PageBody className="max-w-none">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-[20px] font-semibold tracking-tight">
+              Members <span className="text-muted-foreground font-normal">({members.length})</span>
+            </h2>
+            <p className="text-muted-foreground mt-1">
+              People in {org.name}. Only members can see its projects and data.
+            </p>
+          </div>
+          {canInvite && <InviteDialog assignable={assignable} orgName={org.name} />}
         </div>
-        {canInvite && (
-          <section aria-labelledby="invite-heading" className="bg-card rounded-lg border p-5">
-            <h3 id="invite-heading" className="mb-4 font-semibold">
-              Invite people
-            </h3>
-            <InviteForm assignable={assignable} />
-          </section>
-        )}
         <MembersTable
           members={members.map((m) => ({ ...m, joinedAt: m.joinedAt.toISOString() }))}
+          currentUserId={scope.userId}
+          assignable={MANAGE.includes(scope.role) ? assignable : []}
+        />
+        <InvitationsTable
           invitations={invitations.map((i) => ({
             id: i.id,
             email: i.email,
             role: i.role,
             expiresAt: i.expiresAt.toISOString(),
           }))}
-          currentUserId={scope.userId}
-          assignable={MANAGE.includes(scope.role) ? assignable : []}
-          canRevokeInvites={canInvite}
+          canRevoke={canInvite}
         />
-      </div>
+        {canInvite && (
+          <ActivityList
+            events={activity.map((e) => ({
+              id: e.id,
+              action: e.action,
+              actorName: e.actorName,
+              details: e.details,
+              occurredAt: e.occurredAt.toISOString(),
+            }))}
+          />
+        )}
+      </PageBody>
     </>
   );
 }
