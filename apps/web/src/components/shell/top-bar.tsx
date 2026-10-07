@@ -1,8 +1,11 @@
 import { Search } from "lucide-react";
+import { getSession } from "@/server/auth";
 import { ThemeToggle } from "./theme-toggle";
+import { UserMenu } from "./user-menu";
 
-/** Top bar: workspace name, search and theme. Org switcher and user menu arrive with auth (OL-8, OL-9). */
-export function TopBar({ title }: { title: string }) {
+/** Top bar: page title, search, theme and account. The org switcher arrives with OL-9. */
+export async function TopBar({ title }: { title: string }) {
+  const session = await getSession();
   return (
     <header className="bg-background/80 sticky top-0 z-10 flex h-14 items-center gap-4 border-b px-6 backdrop-blur">
       <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
@@ -17,6 +20,7 @@ export function TopBar({ title }: { title: string }) {
           <kbd className="font-mono text-[11px]">/</kbd>
         </label>
         <ThemeToggle />
+        {session && <UserMenu name={session.user.name} email={session.user.email} />}
       </div>
     </header>
   );

@@ -1,8 +1,12 @@
 import type { ReactNode } from "react";
 import { NavRail } from "@/components/shell";
+import { requireSession } from "@/server/auth";
 
-/** Authenticated application frame: icon rail + scrollable page area. */
-export default function AppLayout({ children }: { children: ReactNode }) {
+export const dynamic = "force-dynamic";
+
+/** Authenticated application frame: icon rail + scrollable page area. Redirects to sign-in. */
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  await requireSession();
   return (
     <div className="flex h-dvh overflow-hidden">
       <NavRail />

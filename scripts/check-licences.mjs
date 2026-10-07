@@ -21,6 +21,8 @@ const EXCEPTIONS = {
     "libvips binaries (LGPL-3.0) are dynamically linked by Next.js image optimisation and not modified",
   "caniuse-lite": "CC-BY-4.0 data used at build time only",
   geist: "SIL Open Font Licence permits bundling fonts with software",
+  lightningcss:
+    "MPL-2.0 (file-level copyleft), used unmodified by the CSS build; reaches the prod tree only via better-auth's optional vitest peer",
 };
 
 const raw = execSync("pnpm licenses list --prod --json", {

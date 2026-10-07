@@ -15,6 +15,16 @@ export const configSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: z.stringbool().default(true),
+  /** Public origin of the web app, used for cookies, redirects and OAuth callbacks. */
+  APP_URL: z.url().default("http://localhost:3000"),
+  /** Signs session cookies and encrypts two-factor secrets. Generate with `openssl rand -base64 32`. */
+  AUTH_SECRET: z.string().min(32, "must be at least 32 characters"),
+  /** Set to "false" to allow only invited users (and the first user) to create accounts. */
+  AUTH_ALLOW_SIGNUP: z.stringbool().default(true),
+  /** Minimum password length for new and changed passwords (6–128). */
+  AUTH_PASSWORD_MIN_LENGTH: z.coerce.number().int().min(6).max(128).default(6),
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 
@@ -37,6 +47,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   const cfg = result.data;
   if (cfg.STORAGE_DRIVER === "s3" && (!cfg.S3_ACCESS_KEY_ID || !cfg.S3_SECRET_ACCESS_KEY)) {
     throw new ConfigError(["S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are required when STORAGE_DRIVER=s3"]);
+  }
+  if (Boolean(cfg.GOOGLE_CLIENT_ID) !== Boolean(cfg.GOOGLE_CLIENT_SECRET)) {
+    throw new ConfigError(["GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"]);
   }
   return cfg;
 }

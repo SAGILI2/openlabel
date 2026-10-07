@@ -63,12 +63,17 @@ describe("runMigrations", () => {
       const rows = await sql<{ table_name: string }[]>`
         select table_name from information_schema.tables where table_schema = 'public' order by table_name`;
       expect(rows.map((r) => r.table_name)).toEqual([
+        "accounts",
         "assets",
         "audit_events",
         "memberships",
         "organizations",
         "projects",
+        "rate_limits",
+        "sessions",
+        "two_factors",
         "users",
+        "verifications",
       ]);
     } finally {
       await sql.end();
