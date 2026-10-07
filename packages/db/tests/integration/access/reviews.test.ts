@@ -16,6 +16,8 @@ import {
   saveAnnotation,
   setReviewRules,
   submitForReview,
+  submitManyForReview,
+  reviewManyAssets,
   type OrgRole,
 } from "../../../src/access/index.js";
 import { jobs, users } from "../../../src/schema/index.js";
@@ -183,6 +185,77 @@ describe("review workflow", () => {
       await conn.db.select({ payload: jobs.payload }).from(jobs).where(eq(jobs.kind, "send-email"))
     ).filter((j) => j.payload.template === "review-requested");
     expect(job?.payload.props).toMatchObject({ pageName: "a.png", path: `/projects/p/label/${asset.id}` });
+  });
+
+  it("sends many pages at once, skips ones already in review or unlabelled, and emails each reviewer once", async () => {
+    const { ownerScope, project, labeller, rev1, asset } = await setup();
+    const extra = async (name: string) =>
+      (
+        await registerAsset(ownerScope, {
+          projectId: project.id,
+          kind: "image",
+          storageKey: `k/${name}`,
+          sha256: name,
+          byteSize: 1,
+          mimeType: "image/png",
+          originalName: `${name}.png`,
+          mediaMeta: {},
+        })
+      ).asset;
+    const b = await extra("b");
+    const unlabelled = await extra("c");
+    await saveAnnotation(labeller.scope, b.id, empty, 0);
+    await submitForReview(labeller.scope, b.id, [rev1.user.id]);
+    await conn.sql`delete from jobs where kind = 'send-email'`;
+
+    const d = await extra("d");
+    await saveAnnotation(labeller.scope, d.id, empty, 0);
+    const result = await submitManyForReview(
+      labeller.scope,
+      project.id,
+      [asset.id, b.id, unlabelled.id, d.id],
+      [rev1.user.id],
+    );
+    expect(result.sent).toBe(2);
+    expect(result.skipped.map((s) => s.reason)).toEqual([
+      "Already in review.",
+      "Not labelled yet (OCR draft only).",
+    ]);
+    expect((await getReviewState(labeller.scope, d.id)).status).toBe("submitted");
+    const mail = await conn.db
+      .select({ payload: jobs.payload })
+      .from(jobs)
+      .where(eq(jobs.kind, "send-email"));
+    expect(mail).toHaveLength(1);
+    expect(mail[0]?.payload).toMatchObject({ to: "rev1@x.test", props: { pageName: "2 pages" } });
+  });
+
+  it("approves many pages at once and skips ones not in review or sent by the reviewer", async () => {
+    const { ownerScope, project, labeller, rev1, asset } = await setup();
+    const { asset: second } = await registerAsset(ownerScope, {
+      projectId: project.id,
+      kind: "image",
+      storageKey: "k/e",
+      sha256: "e",
+      byteSize: 1,
+      mimeType: "image/png",
+      originalName: "e.png",
+      mediaMeta: {},
+    });
+    await saveAnnotation(labeller.scope, second.id, empty, 0);
+    await submitForReview(labeller.scope, asset.id, [rev1.user.id]);
+
+    await expectCode(
+      reviewManyAssets(labeller.scope, project.id, [asset.id], { decision: "approve", body: "" }),
+      "FORBIDDEN",
+    );
+    const result = await reviewManyAssets(rev1.scope, project.id, [asset.id, second.id], {
+      decision: "approve",
+      body: "",
+    });
+    expect(result.done).toBe(1);
+    expect(result.skipped).toEqual([{ assetId: second.id, reason: "Not in review." }]);
+    expect((await getReviewState(rev1.scope, asset.id)).status).toBe("approved");
   });
 
   it("adds the project's default reviewers on submit", async () => {

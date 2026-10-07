@@ -152,7 +152,8 @@ export async function submitForReview(
   scope: OrgScope,
   assetId: string,
   reviewerIds: string[],
-): Promise<void> {
+  opts: { notify?: boolean } = {},
+): Promise<string[]> {
   requireRole(scope, "labeller");
   const asset = await assetInScope(scope, assetId);
   const version = await currentVersion(scope, assetId);
@@ -183,8 +184,84 @@ export async function submitForReview(
       resourceId: assetId,
       details: { version, reviewers: requested },
     });
-    if (requested.length > 0) await notifyReviewers(tx, scope, assetId, version, requested);
+    if (requested.length > 0 && opts.notify !== false) {
+      await notifyReviewers(tx, scope, assetId, version, requested);
+    }
   });
+  return requested;
+}
+
+export interface BulkSubmitResult {
+  sent: number;
+  /** Pages left alone, with why: not labelled yet, already in review, approved. */
+  skipped: { assetId: string; reason: string }[];
+}
+
+/**
+ * Sends many pages of one project for review at once, to the same reviewers (plus the project's
+ * default reviewers). Pages already in review or approved are skipped, as are pages with no saved
+ * labels. Each reviewer gets one email for the whole batch, not one per page.
+ */
+export async function submitManyForReview(
+  scope: OrgScope,
+  projectId: string,
+  assetIds: string[],
+  reviewerIds: string[],
+): Promise<BulkSubmitResult> {
+  requireRole(scope, "labeller");
+  const ids = [...new Set(assetIds)];
+  if (ids.length === 0) return { sent: 0, skipped: [] };
+  if (ids.length > 5000) throw new AccessError("CONFLICT", "Send at most 5,000 pages at a time.");
+  const rows = await scope.db
+    .select({ id: assets.id, status: assets.status })
+    .from(assets)
+    .where(and(eq(assets.orgId, scope.orgId), eq(assets.projectId, projectId), inArray(assets.id, ids)));
+  const found = new Map(rows.map((r) => [r.id, r.status]));
+  const skipped: BulkSubmitResult["skipped"] = [];
+  const notified = new Set<string>();
+  let sent = 0;
+  for (const id of ids) {
+    const status = found.get(id);
+    if (!status) skipped.push({ assetId: id, reason: "Not in this project." });
+    else if (status === "submitted") skipped.push({ assetId: id, reason: "Already in review." });
+    else if (status === "approved") skipped.push({ assetId: id, reason: "Already approved." });
+    else if (status === "new" || status === "prelabelling" || status === "prelabelled")
+      skipped.push({ assetId: id, reason: "Not labelled yet (OCR draft only)." });
+    else {
+      try {
+        for (const r of await submitForReview(scope, id, reviewerIds, { notify: false })) notified.add(r);
+        sent += 1;
+      } catch (err) {
+        if (!(err instanceof AccessError) || err.code === "FORBIDDEN") throw err;
+        skipped.push({ assetId: id, reason: err.message });
+      }
+    }
+  }
+  const others = [...notified].filter((id) => id !== scope.userId);
+  if (sent > 0 && others.length > 0) {
+    await scope.db.transaction(async (tx) => {
+      const [project] = await tx
+        .select({ name: projects.name, slug: projects.slug })
+        .from(projects)
+        .where(eq(projects.id, projectId));
+      const requesterName = await userName(tx, scope.userId);
+      const recipients = await tx.select({ email: users.email }).from(users).where(inArray(users.id, others));
+      for (const r of recipients) {
+        await queueEmail(tx, {
+          orgId: scope.orgId,
+          to: r.email,
+          template: "review-requested",
+          props: {
+            requesterName,
+            projectName: project?.name ?? "a project",
+            pageName: sent === 1 ? "1 page" : `${String(sent)} pages`,
+            path: `/projects/${project?.slug ?? ""}?filter=mine`,
+          },
+        });
+      }
+    });
+  }
+  return { sent, skipped };
 }
 
 type Tx = Parameters<Parameters<OrgScope["db"]["transaction"]>[0]>[0];
@@ -397,6 +474,61 @@ export async function getReviewState(scope: OrgScope, assetId: string): Promise<
 }
 
 /** Pages waiting on the current user's review, oldest submission first. */
+export interface BulkReviewResult {
+  done: number;
+  skipped: { assetId: string; reason: string }[];
+}
+
+/**
+ * Approves (or requests changes on) many pages at once, each at its current version, under the
+ * same rules as reviewing one page: reviewer roles only, no approving your own pages unless the
+ * project allows it, only pages that are in review.
+ */
+export async function reviewManyAssets(
+  scope: OrgScope,
+  projectId: string,
+  assetIds: string[],
+  input: { decision: "approve" | "request_changes"; body: string },
+): Promise<BulkReviewResult> {
+  if (!REVIEWER_ROLES.includes(scope.role)) {
+    throw new AccessError("FORBIDDEN", "Only reviewers, managers and admins can review.");
+  }
+  if (input.decision === "request_changes" && !input.body.trim()) {
+    throw new AccessError("CONFLICT", "Say what needs to change.");
+  }
+  const ids = [...new Set(assetIds)];
+  if (ids.length > 5000) throw new AccessError("CONFLICT", "Review at most 5,000 pages at a time.");
+  if (ids.length === 0) return { done: 0, skipped: [] };
+  const rows = await scope.db
+    .select({ id: assets.id, status: assets.status })
+    .from(assets)
+    .where(and(eq(assets.orgId, scope.orgId), eq(assets.projectId, projectId), inArray(assets.id, ids)));
+  const found = new Map(rows.map((r) => [r.id, r.status]));
+  const result: BulkReviewResult = { done: 0, skipped: [] };
+  for (const id of ids) {
+    const status = found.get(id);
+    if (status !== "submitted") {
+      result.skipped.push({
+        assetId: id,
+        reason: !status
+          ? "Not in this project."
+          : status === "approved"
+            ? "Already approved."
+            : "Not in review.",
+      });
+      continue;
+    }
+    try {
+      await reviewAsset(scope, id, { ...input, version: await currentVersion(scope, id) });
+      result.done += 1;
+    } catch (err) {
+      if (!(err instanceof AccessError)) throw err;
+      result.skipped.push({ assetId: id, reason: err.message });
+    }
+  }
+  return result;
+}
+
 export async function myReviewQueue(
   scope: OrgScope,
   projectId?: string,
