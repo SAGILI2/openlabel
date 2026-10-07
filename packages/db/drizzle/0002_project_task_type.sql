@@ -1,0 +1,2 @@
+CREATE INDEX "projects_task_type_idx" ON "projects" USING btree ("task");--> statement-breakpoint
+ALTER TABLE "projects" ADD CONSTRAINT "projects_task_type_matches_modality" CHECK ("projects"."task" ~ ('^' || "projects"."modality"::text || '\.[a-z][a-z0-9-]*$'));

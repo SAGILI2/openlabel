@@ -140,6 +140,9 @@ importers:
         specifier: ^3.4.9
         version: 3.4.9
     devDependencies:
+      '@openlabel/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.1

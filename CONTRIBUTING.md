@@ -20,6 +20,11 @@ See the Development section of the [README](README.md).
 5. Open a pull request using the template; set the ticket to `in-review`.
 6. A maintainer reviews. The ticket is `done` when every acceptance criterion is checked and CI passes.
 
+`main` is protected by a repository ruleset that applies to everyone, maintainers included:
+changes land only through pull requests; every CI job (lint/typecheck/test/build, dependency
+audit and licences, secret scan, Docker image, DCO) must pass on a branch that is up to date
+with `main`; review threads must be resolved; and force-pushes and branch deletion are blocked.
+
 ## Commit messages
 
 We use [Conventional Commits](https://www.conventionalcommits.org/):
