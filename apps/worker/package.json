@@ -15,6 +15,7 @@
   "dependencies": {
     "@openlabel/contracts": "workspace:*",
     "@openlabel/db": "workspace:*",
+    "@openlabel/emails": "workspace:*",
     "@openlabel/exporters": "workspace:*",
     "@openlabel/storage": "workspace:*"
   },

@@ -3,6 +3,7 @@ import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import type { Database } from "../client/index.js";
 import { auditEvents, invitations, memberships, organizations, users } from "../schema/index.js";
 import { AccessError } from "./errors.js";
+import { queueEmail } from "./mail.js";
 import { canAssignRole, requireRole, type OrgRole, type OrgScope } from "./scope.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -74,6 +75,28 @@ export async function createInvitation(
       resourceType: "invitation",
       resourceId: row.id,
       details: { email, role: input.role },
+    });
+    const [context] = await tx
+      .select({ orgName: organizations.name, inviterName: users.name })
+      .from(organizations)
+      .innerJoin(users, eq(users.id, scope.userId))
+      .where(eq(organizations.id, scope.orgId));
+    await queueEmail(tx, {
+      orgId: scope.orgId,
+      to: email,
+      template: "invitation",
+      props: {
+        orgName: context?.orgName ?? "OpenLabel",
+        inviterName: context?.inviterName ?? "A teammate",
+        role: input.role,
+        path: `/invite/${token}`,
+        expiresAt: expiresAt.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
+        }),
+      },
     });
     return { id: row.id, email, role: input.role, expiresAt, token };
   });

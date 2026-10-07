@@ -61,7 +61,7 @@ export async function switchOrganizationAction(orgId: string): Promise<ActionRes
   return { ok: true, data: undefined };
 }
 
-/** Invites someone; returns the one-time link to share (email delivery arrives with notifications). */
+/** Invites someone; emails the one-time link and returns it to show as well. */
 export async function inviteMemberAction(input: {
   email: string;
   role: string;

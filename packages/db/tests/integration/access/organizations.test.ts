@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb } from "../../../src/client/index.js";
 import { runMigrations } from "../../../src/migrate/run.js";
@@ -17,7 +18,7 @@ import {
   revokeInvitation,
   type OrgRole,
 } from "../../../src/access/index.js";
-import { users } from "../../../src/schema/index.js";
+import { jobs, users } from "../../../src/schema/index.js";
 import { startPostgres } from "../../support/postgres.js";
 
 let pg: Awaited<ReturnType<typeof startPostgres>>;
@@ -65,7 +66,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await conn.sql`truncate users, organizations, audit_events restart identity cascade`;
+  await conn.sql`truncate users, organizations, jobs, audit_events restart identity cascade`;
 });
 
 describe("organisations", () => {
@@ -133,6 +134,25 @@ describe("invitations", () => {
     const acme = await createOrganization(conn.db, ada.id, { name: "Acme", slug: "acme" });
     const cy = await join(ada.id, acme.id, "cy@x.test", "labeller");
     expect((await resolveOrgScope(conn.db, cy.id, acme.id)).role).toBe("labeller");
+  });
+
+  it("queues an invitation email with the link path", async () => {
+    const ada = await makeUser("ada@x.test");
+    const acme = await createOrganization(conn.db, ada.id, { name: "Acme", slug: "acme" });
+    const invite = await createInvitation(await resolveOrgScope(conn.db, ada.id, acme.id), {
+      email: "Grace@X.test",
+      role: "admin",
+    });
+    const queued = await conn.db
+      .select({ payload: jobs.payload })
+      .from(jobs)
+      .where(eq(jobs.kind, "send-email"));
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.payload).toMatchObject({
+      to: "grace@x.test",
+      template: "invitation",
+      props: { orgName: "Acme", inviterName: "ada", role: "admin", path: `/invite/${invite.token}` },
+    });
   });
 
   it("stores only a hash of the token", async () => {

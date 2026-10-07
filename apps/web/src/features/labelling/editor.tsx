@@ -117,6 +117,12 @@ export function Editor(props: EditorProps) {
     props.review.status === "submitted" && props.canReview ? "review" : "label",
   );
   const [pending, startTransition] = useTransition();
+  // Saving a page that is in review or approved reopens it as a draft (the server drops it back to
+  // in-progress and earlier approvals go stale). Track that here until the page reloads.
+  const [reopened, setReopened] = useState(false);
+  const reviewStatus = reopened ? "in_progress" : props.review.status;
+  /** Sent for review before, so the button resends to the same reviewers. */
+  const sentBefore = props.review.requested.length > 0 || props.review.history.length > 0;
   const textRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -134,13 +140,13 @@ export function Editor(props: EditorProps) {
     canvasRef.current?.zoom(kind);
   };
 
-  // What gets saved: boxes and text. OCR confidence is review progress, not label data, so
-  // ticking a word "checked" never counts as a change.
+  // What gets saved: text, boxes, and whether a person has checked the word (no OCR confidence left).
   const signature = (ws: EditableWord[]) =>
     JSON.stringify(
       ws.map((w) => [
         w.id,
         w.text,
+        w.conf === null,
         Math.round(w.box.x),
         Math.round(w.box.y),
         Math.round(w.box.width),
@@ -178,14 +184,18 @@ export function Editor(props: EditorProps) {
         setDirty(false);
         setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         if (then) router.push(then);
+        else if (props.review.status === "submitted" || props.review.status === "approved") {
+          setReopened(true);
+          router.refresh();
+        }
       });
     },
-    [props.assetId, words, version, router],
+    [props.assetId, props.review.status, words, version, router],
   );
 
   const [submitting, setSubmitting] = useState(false);
   /** Labeller can submit while the page is a draft or was sent back with changes requested. */
-  const submittable = !["submitted", "approved"].includes(props.review.status);
+  const submittable = !["submitted", "approved"].includes(reviewStatus);
 
   /** Final step: flush any pending draft, then send the page to reviewers. */
   async function submit() {
@@ -212,6 +222,7 @@ export function Editor(props: EditorProps) {
       setError(sent.error);
       return;
     }
+    setReopened(false);
     setPanel("review");
     router.refresh();
   }
@@ -251,7 +262,7 @@ export function Editor(props: EditorProps) {
   /** Marks the selected word as checked (clears its low-confidence flag) and moves on. */
   function accept() {
     if (!selected) return;
-    setWords((ws) => ws.map((w) => (w.id === selected.id ? { ...w, conf: null } : w)));
+    update((ws) => ws.map((w) => (w.id === selected.id ? { ...w, conf: null } : w)));
     step(1);
   }
 
@@ -334,9 +345,13 @@ export function Editor(props: EditorProps) {
       : dirty
         ? "Editing…"
         : savedAt
-          ? `Draft saved ${savedAt}`
+          ? submittable && sentBefore
+            ? `Draft saved ${savedAt}, not sent for review`
+            : `Draft saved ${savedAt}`
           : version > 0
-            ? "All changes saved"
+            ? submittable && sentBefore
+              ? "Draft saved, not sent for review"
+              : "All changes saved"
             : props.source === "prediction"
               ? "OCR draft, not edited yet"
               : "";
@@ -405,7 +420,7 @@ export function Editor(props: EditorProps) {
               <Send className="size-3.5" />
               {submitting
                 ? "Sending…"
-                : props.review.status === "rejected"
+                : reviewStatus === "rejected" || sentBefore
                   ? "Resubmit"
                   : "Submit for review"}
             </button>

@@ -61,7 +61,21 @@ export function SignInForm({
       )}
       <form onSubmit={(e) => void onSubmit(e)} className="grid gap-4" noValidate>
         <FormField id="email" label="Email" type="email" autoComplete="email" required autoFocus />
-        <FormField id="password" label="Password" type="password" autoComplete="current-password" required />
+        <FormField
+          id="password"
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          required
+          aside={
+            <Link
+              href="/forgot-password"
+              className="text-muted-foreground hover:text-foreground text-[12px] underline-offset-4 hover:underline"
+            >
+              Forgot password?
+            </Link>
+          }
+        />
         <div className="flex items-center gap-2">
           <Checkbox
             id="remember"

@@ -26,8 +26,13 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U openlabel" --health-interval 5s --health-timeout 5s --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ["1025:1025", "8025:8025"]
     env:
       TEST_DATABASE_URL: postgres://openlabel:openlabel@localhost:5432/openlabel_test
+      MAILPIT_URL: http://localhost:8025
+      MAILPIT_SMTP: localhost:1025
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

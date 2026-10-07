@@ -29,6 +29,18 @@ export const configSchema = z.object({
   OCR_SERVICE_URL: z.url().default("http://ocr:8000"),
   /** Concurrent pre-label jobs per worker process. */
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(2),
+  /** How email leaves: "smtp" (any provider, e.g. Mailtrap or Mailpit), "log" (printed by the worker) or "noop". */
+  MAIL_TRANSPORT: z.enum(["smtp", "log", "noop"]).default("log"),
+  /** Sender shown to recipients, e.g. `OpenLabel <no-reply@example.com>`. */
+  MAIL_FROM: z.string().min(3).default("OpenLabel <no-reply@openlabel.local>"),
+  /** Send every message to this one inbox instead of the real recipient (staging, development). */
+  MAIL_REDIRECT_ALL_TO: z.email().optional(),
+  SMTP_HOST: z.string().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  /** "true" for implicit TLS (port 465); otherwise STARTTLS is used when the server offers it. */
+  SMTP_SECURE: z.stringbool().default(false),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 
@@ -54,6 +66,12 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   }
   if (Boolean(cfg.GOOGLE_CLIENT_ID) !== Boolean(cfg.GOOGLE_CLIENT_SECRET)) {
     throw new ConfigError(["GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set together"]);
+  }
+  if (cfg.MAIL_TRANSPORT === "smtp" && !cfg.SMTP_HOST) {
+    throw new ConfigError(["SMTP_HOST is required when MAIL_TRANSPORT=smtp"]);
+  }
+  if (Boolean(cfg.SMTP_USER) !== Boolean(cfg.SMTP_PASSWORD)) {
+    throw new ConfigError(["SMTP_USER and SMTP_PASSWORD must be set together"]);
   }
   return cfg;
 }

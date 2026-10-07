@@ -121,6 +121,15 @@ services:
       retries: 6
       start_period: 20s
 
+  # Local mail catcher for development: `docker compose --profile mail up -d`, then
+  # MAIL_TRANSPORT=smtp SMTP_HOST=mailpit SMTP_PORT=1025 and open http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    profiles: ["mail"]
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_PORT:-8025}:8025"
+
 volumes:
   postgres-data:
   storage-data:

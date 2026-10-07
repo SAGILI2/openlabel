@@ -71,13 +71,15 @@ export function ReviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   // Before the first submit, chosen reviewers live here; afterwards they're stored on the page.
-  const [draftReviewers, setDraftReviewers] = useState<string[]>([]);
+  // A page edited after it was sent keeps its earlier reviewers, ready to resend.
+  const [draftReviewers, setDraftReviewers] = useState<string[]>(() => review.requested.map((r) => r.userId));
   const stateKey =
     review.status === "submitted" || review.status === "approved" || review.status === "rejected"
       ? review.status
       : "draft";
   const { label, tone, icon: StateIcon } = STATE[stateKey] ?? { label: "", tone: "", icon: CircleDot };
   const isDraft = stateKey === "draft";
+  const editedSinceSent = isDraft && review.history.length + review.requested.length > 0;
   const shown = isDraft
     ? reviewers
         .filter((r) => draftReviewers.includes(r.userId))
@@ -102,7 +104,7 @@ export function ReviewPanel({
       <div className="flex items-center justify-between gap-2">
         <span className={cn("inline-flex items-center gap-1.5 text-[13px] font-medium", tone)}>
           <StateIcon className="size-4" aria-hidden />
-          {label}
+          {editedSinceSent ? "Edited, not sent yet" : label}
         </span>
         <span className="text-muted-foreground text-[12px] tabular-nums">
           {review.approvals}/{review.requiredApprovals} approvals
@@ -146,7 +148,7 @@ export function ReviewPanel({
           }}
         >
           <Send aria-hidden />
-          {stateKey === "rejected" ? "Send back for review" : "Send for review"}
+          {stateKey === "rejected" || editedSinceSent ? "Send back for review" : "Send for review"}
         </Button>
       )}
       {dirty && <p className="text-muted-foreground text-[11px]">Save your changes before reviewing.</p>}
