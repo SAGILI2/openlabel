@@ -1,0 +1,1 @@
+export { getTaskTypeRegistry } from "./registry";

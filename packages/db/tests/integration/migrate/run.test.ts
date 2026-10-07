@@ -102,4 +102,23 @@ describe("runMigrations", () => {
       await sql.end();
     }
   });
+
+  it("keeps a project's task type consistent with its modality", async () => {
+    const sql = postgres(url, { max: 1 });
+    try {
+      const [org] = await sql<
+        { id: string }[]
+      >`insert into organizations (name, slug) values ('T', 'task-org') returning id`;
+      if (!org) throw new Error("seed failed");
+      await sql`insert into projects (org_id, name, slug, modality, task) values (${org.id}, 'A', 'a', 'image', 'image.detection')`;
+      await expect(
+        sql`insert into projects (org_id, name, slug, modality, task) values (${org.id}, 'B', 'b', 'audio', 'image.detection')`,
+      ).rejects.toThrow(/projects_task_type_matches_modality/);
+      await expect(
+        sql`insert into projects (org_id, name, slug, modality, task) values (${org.id}, 'C', 'c', 'image', 'imageXdetection')`,
+      ).rejects.toThrow(/projects_task_type_matches_modality/);
+    } finally {
+      await sql.end();
+    }
+  });
 });

@@ -33,6 +33,7 @@
     "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "@openlabel/contracts": "workspace:*",
     "@types/node": "^24.19.1",
     "drizzle-kit": "^0.31.11"
   }
