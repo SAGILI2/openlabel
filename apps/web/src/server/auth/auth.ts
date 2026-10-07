@@ -37,6 +37,10 @@ export function createAuth(cfg: Config, db: Database) {
     session: {
       expiresIn: 7 * DAY,
       updateAge: DAY,
+      additionalFields: {
+        // Set only by setActiveOrganization after a membership check; never accepted from clients.
+        activeOrgId: { type: "string", required: false, input: false },
+      },
     },
     rateLimit: {
       enabled: true,

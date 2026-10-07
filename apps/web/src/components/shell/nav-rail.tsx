@@ -5,21 +5,17 @@ import { usePathname } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { LogoMark } from "./logo-mark";
-import { NAV_ITEMS } from "./nav-items";
+import { isActive, NAV_ITEMS } from "./nav-items";
 
-function isActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
-}
-
-/** Narrow icon rail: keeps the labelling canvas as wide as possible. */
+/** Narrow icon rail (tablet and up): keeps the labelling canvas as wide as possible. */
 export function NavRail() {
   const pathname = usePathname();
   return (
     <nav
       aria-label="Main"
-      className="bg-sidebar border-sidebar-border flex w-14 shrink-0 flex-col items-center gap-1 border-r py-3"
+      className="bg-sidebar border-sidebar-border hidden w-14 shrink-0 flex-col md:flex items-center gap-1 border-r pt-[14px] pb-3"
     >
-      <Link href="/" className="text-foreground mb-3 rounded-md p-1" aria-label="OpenLabel home">
+      <Link href="/" className="text-foreground mb-4 rounded-md p-1" aria-label="OpenLabel home">
         <LogoMark className="size-7" />
       </Link>
       {NAV_ITEMS.map(({ href, label, icon: Icon, shortcut }) => {

@@ -1,5 +1,5 @@
 import { FolderKanban } from "lucide-react";
-import { TopBar } from "@/components/shell";
+import { PageBody, TopBar } from "@/components/shell";
 import { TaskTypeCatalog } from "@/features/tasks";
 import { getTaskTypeRegistry } from "@/server/tasks";
 
@@ -10,7 +10,7 @@ export default function ProjectsPage() {
   return (
     <>
       <TopBar title="Projects" />
-      <div className="mx-auto grid w-full max-w-[1040px] gap-10 px-6 py-8">
+      <PageBody className="gap-10">
         <section className="flex items-start gap-4 rounded-lg border border-dashed p-6">
           <div className="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md border">
             <FolderKanban className="size-5" strokeWidth={1.75} aria-hidden />
@@ -34,7 +34,7 @@ export default function ProjectsPage() {
           </p>
           <TaskTypeCatalog taskTypes={taskTypes} />
         </section>
-      </div>
+      </PageBody>
     </>
   );
 }

@@ -44,6 +44,8 @@ The palette is neutral by design, so customer material is never tinted by the UI
 └──────┴──────────────────────────────────────────────┘
 ```
 
+- Top bar 64px; icon rail 56px wide (tablet and up), bottom tab bar on phones; the main area scrolls without a visible scrollbar.
+- Pages start beside the rail, left-aligned with the top bar, capped at 1100px. Never centred in a narrow column: spare width falls to the right.
 - Left-aligned everywhere; 4px spacing grid; radius 6px for controls, 10px for panels, none on the canvas.
 - Density: compact by default (labellers see more), roomier for settings.
 
