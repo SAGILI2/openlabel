@@ -1,10 +1,15 @@
 "use client";
 import type Konva from "konva";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Transformer } from "react-konva";
 import { LOW_CONFIDENCE, normaliseBox, type Box, type EditableWord } from "./regions";
 
-export type Tool = "select" | "draw";
+export type Tool = "select" | "pan" | "draw";
+
+/** Zoom controls the workspace toolbar calls on the canvas. */
+export interface CanvasHandle {
+  zoom: (kind: "in" | "out" | "fit" | "focus") => void;
+}
 
 interface Props {
   imageUrl: string;
@@ -14,6 +19,8 @@ interface Props {
   onSelect: (id: string | null) => void;
   onChangeBox: (id: string, box: Box) => void;
   onDraw: (box: Box) => void;
+  /** Receives zoom controls (in/out, fit page, centre on the selected box). */
+  handle?: Ref<CanvasHandle> | undefined;
 }
 
 const INK = "#2B59C3";
@@ -38,7 +45,16 @@ function useImage(url: string): HTMLImageElement | null {
  * The page with its word boxes. Wheel zooms around the cursor, dragging empty space pans (in
  * select mode) or draws a new box (in draw mode). Boxes are kept in image pixels.
  */
-export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onChangeBox, onDraw }: Props) {
+export function CanvasStage({
+  imageUrl,
+  words,
+  selectedId,
+  tool,
+  onSelect,
+  onChangeBox,
+  onDraw,
+  handle,
+}: Props) {
   const image = useImage(imageUrl);
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -73,6 +89,35 @@ export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onCha
     : { scale: 1, x: 0, y: 0 };
   const view = userView ?? fit;
 
+  useImperativeHandle(handle, () => ({
+    zoom(kind) {
+      const cx = size.width / 2;
+      const cy = size.height / 2;
+      if (kind === "fit") {
+        setView(null);
+        return;
+      }
+      if (kind === "focus") {
+        const w = words.find((x) => x.id === selectedId);
+        if (!w) return;
+        const scale = Math.min(
+          Math.max(Math.min((size.width * 0.35) / w.box.width, (size.height * 0.2) / w.box.height), 0.2),
+          8,
+        );
+        setView({
+          scale,
+          x: cx - (w.box.x + w.box.width / 2) * scale,
+          y: cy - (w.box.y + w.box.height / 2) * scale,
+        });
+        return;
+      }
+      const factor = kind === "in" ? 1.25 : 0.8;
+      const scale = Math.min(Math.max(view.scale * factor, 0.05), 20);
+      const anchor = { x: (cx - view.x) / view.scale, y: (cy - view.y) / view.scale };
+      setView({ scale, x: cx - anchor.x * scale, y: cy - anchor.y * scale });
+    },
+  }));
+
   // Attach resize handles to the selected box.
   useEffect(() => {
     const tr = transformerRef.current;
@@ -104,7 +149,7 @@ export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onCha
     <div
       ref={containerRef}
       className="bg-muted/60 relative h-full w-full overflow-hidden"
-      style={{ cursor: tool === "draw" ? "crosshair" : "default" }}
+      style={{ cursor: tool === "draw" ? "crosshair" : tool === "pan" ? "grab" : "default" }}
     >
       <Stage
         ref={stageRef}
@@ -114,7 +159,7 @@ export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onCha
         y={view.y}
         scaleX={view.scale}
         scaleY={view.scale}
-        draggable={tool === "select" && !draft}
+        draggable={(tool === "select" || tool === "pan") && !draft}
         onDragEnd={(e) => {
           if (e.target === e.target.getStage()) setView({ ...view, x: e.target.x(), y: e.target.y() });
         }}
@@ -126,7 +171,7 @@ export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onCha
           if (tool === "draw") {
             const p = toImage(stage);
             if (p) setDraft({ x: p.x, y: p.y, width: 0, height: 0 });
-          } else if (clickedEmpty) {
+          } else if (tool === "select" && clickedEmpty) {
             onSelect(null);
           }
         }}
@@ -207,6 +252,9 @@ export function CanvasStage({ imageUrl, words, selectedId, tool, onSelect, onCha
           />
         </Layer>
       </Stage>
+      <span className="bg-card/95 text-muted-foreground pointer-events-none absolute bottom-3 left-3 rounded-md border px-2 py-1 font-mono text-[11px] tabular-nums shadow-sm">
+        {Math.round(view.scale * 100)}%
+      </span>
       {!image && (
         <p className="text-muted-foreground absolute inset-0 grid place-items-center text-[13px]">
           Loading page…

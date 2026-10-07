@@ -1,4 +1,4 @@
-export { Editor, type EditorProps } from "./editor";
+export { Editor, type EditorProps, type StripItem } from "./editor";
 export {
   annotationFromWords,
   LOW_CONFIDENCE,

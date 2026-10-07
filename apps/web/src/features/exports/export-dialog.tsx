@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FormError, FormField } from "@/features/auth";
 import { cn } from "@/lib/utils";
 import { createExportAction } from "@/server/projects/actions";
@@ -63,11 +65,15 @@ export function ExportDialog({
   projectId,
   formats,
   labelledCount,
+  folders = [],
 }: {
   projectId: string;
   formats: FormatOption[];
   labelledCount: number;
+  /** Folders that can be exported on their own (with their sub-folders). */
+  folders?: { id: string; path: string }[];
 }) {
+  const [folderId, setFolderId] = useState<string>("all");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(`Export ${new Date().toISOString().slice(0, 10)}`);
   const [format, setFormat] = useState(formats[0]?.id ?? "");
@@ -81,7 +87,14 @@ export function ExportDialog({
     event.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await createExportAction({ projectId, name, format, ...split, cropPadding: padding });
+      const result = await createExportAction({
+        projectId,
+        name,
+        format,
+        ...split,
+        cropPadding: padding,
+        folderId: folderId === "all" ? null : folderId,
+      });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -118,33 +131,50 @@ export function ExportDialog({
               setName(e.target.value);
             }}
           />
-          <fieldset className="grid gap-2">
-            <legend className="mb-1.5 text-sm font-medium">Format</legend>
-            {formats.map((f) => (
-              <label
-                key={f.id}
-                className={cn(
-                  "hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-md border p-3",
-                  format === f.id && "border-brand bg-accent hover:bg-accent",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="format"
-                  value={f.id}
-                  checked={format === f.id}
-                  onChange={() => {
-                    setFormat(f.id);
-                  }}
-                  className="accent-brand mt-1"
-                />
-                <span>
-                  <span className="block text-[13px] font-medium">{f.title}</span>
-                  <span className="text-muted-foreground block text-[12px]">{f.description}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
+          {folders.length > 0 && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="export-folder">What to export</Label>
+              <Select value={folderId} onValueChange={setFolderId}>
+                <SelectTrigger id="export-folder" className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Whole project</SelectItem>
+                  {folders.map((f) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      {f.path} <span className="text-muted-foreground">and sub-folders</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="grid gap-2">
+            <Label id="export-format-label">Format</Label>
+            <RadioGroup
+              value={format}
+              onValueChange={setFormat}
+              aria-labelledby="export-format-label"
+              className="gap-2"
+            >
+              {formats.map((f) => (
+                <label
+                  key={f.id}
+                  htmlFor={`format-${f.id}`}
+                  className={cn(
+                    "hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-md border p-3",
+                    format === f.id && "border-brand bg-accent hover:bg-accent",
+                  )}
+                >
+                  <RadioGroupItem id={`format-${f.id}`} value={f.id} className="mt-0.5" />
+                  <span>
+                    <span className="block text-[13px] font-medium">{f.title}</span>
+                    <span className="text-muted-foreground block text-[12px]">{f.description}</span>
+                  </span>
+                </label>
+              ))}
+            </RadioGroup>
+          </div>
           <div className="grid gap-2">
             <p className="text-sm font-medium">Split (by page)</p>
             <div className="grid grid-cols-3 gap-3">

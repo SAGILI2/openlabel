@@ -65,3 +65,15 @@ export {
   type ExportJobData,
   type ExportRow,
 } from "./exports.js";
+export {
+  cleanFolderName,
+  createFolder,
+  deleteFolder,
+  ensureFolderPath,
+  folderTree,
+  moveAssets,
+  renameFolder,
+  subtreeFolderIds,
+  type FolderNode,
+  type FolderRow,
+} from "./folders.js";

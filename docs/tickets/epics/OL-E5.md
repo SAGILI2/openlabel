@@ -14,6 +14,7 @@ Canvas editor with layers, word/line boxes, non-text regions, flags, relations, 
 
 ## Issues
 
+- OL-48: Project file browser with nested folders, and a full-screen labelling workspace
 - OL-46: OCR labelling MVP: projects, image upload, background OCR pre-labelling, canvas editor
 - OL-20: Canvas editor: view, zoom, pan, boxes and polygons
 - OL-21: Word/line text editing panel

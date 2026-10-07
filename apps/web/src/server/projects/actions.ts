@@ -6,7 +6,18 @@ import {
   parseCreateProjectInput,
   splitPlanSchema,
 } from "@openlabel/contracts";
-import { AccessError, createExport, createProject, getProjectById, saveAnnotation } from "@openlabel/db";
+import {
+  AccessError,
+  createExport,
+  createFolder,
+  createProject,
+  deleteFolder,
+  getProjectById,
+  moveAssets,
+  renameFolder,
+  saveAnnotation,
+  subtreeFolderIds,
+} from "@openlabel/db";
 import { EXPORTERS } from "@openlabel/exporters";
 import { refresh } from "next/cache";
 import { z } from "zod";
@@ -70,6 +81,8 @@ export async function createExportAction(input: {
   val: number;
   test: number;
   cropPadding: number;
+  /** Export only this folder and its sub-folders; null = whole project. */
+  folderId?: string | null;
 }): Promise<ActionResult<{ id: string; items: number }>> {
   try {
     const { scope } = await requireOrgScope();
@@ -89,11 +102,83 @@ export async function createExportAction(input: {
       projectId: project.id,
       name,
       format: exporter.id,
-      options: { split: plan, cropPadding: z.number().int().min(0).max(32).parse(input.cropPadding) },
+      options: {
+        split: plan,
+        cropPadding: z.number().int().min(0).max(32).parse(input.cropPadding),
+        ...(input.folderId ? { folderId: input.folderId } : {}),
+      },
+      ...(input.folderId
+        ? { folderIds: await subtreeFolderIds(scope, project.id, z.uuid().parse(input.folderId)) }
+        : {}),
       assign: (ids) => assignSplits(ids, plan),
     });
     refresh();
     return { ok: true, data: { id: row.id, items: row.itemCount } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* ---------- Folders ---------- */
+
+const uuidOrNull = z.uuid().nullable();
+
+export async function createFolderAction(
+  projectId: string,
+  parentId: string | null,
+  name: string,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const folder = await createFolder(scope, z.uuid().parse(projectId), uuidOrNull.parse(parentId), name);
+    refresh();
+    return { ok: true, data: { id: folder.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function renameFolderAction(
+  projectId: string,
+  folderId: string,
+  name: string,
+): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await renameFolder(scope, z.uuid().parse(projectId), z.uuid().parse(folderId), name);
+    refresh();
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteFolderAction(projectId: string, folderId: string): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await deleteFolder(scope, z.uuid().parse(projectId), z.uuid().parse(folderId));
+    refresh();
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function moveAssetsAction(
+  projectId: string,
+  assetIds: string[],
+  folderId: string | null,
+): Promise<ActionResult<{ moved: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const moved = await moveAssets(
+      scope,
+      z.uuid().parse(projectId),
+      z.array(z.uuid()).max(5000).parse(assetIds),
+      uuidOrNull.parse(folderId),
+    );
+    refresh();
+    return { ok: true, data: { moved } };
   } catch (err) {
     return fail(err);
   }

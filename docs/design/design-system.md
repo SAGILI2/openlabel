@@ -55,7 +55,8 @@ The palette is neutral by design, so customer material is never tinted by the UI
 2. **One accent.** Cobalt means "selected / acting". Annotation colours are reserved for labels.
 3. **Show precision.** Hairline rules, tabular numbers, exact coordinates on hover.
 4. **Keyboard first.** Every action has a shortcut, shown in tooltips and menus.
-5. **Honest states.** Empty, loading and error states say what happened and what to do next.
+5. **No browser defaults.** Never `window.alert/confirm/prompt`, native `<select>`, radio or file-picker UI as the visible control. Use `useDialogs()` (confirm/prompt), shadcn Select, RadioGroup, Checkbox and DropdownMenu so everything matches the theme, light and dark.
+6. **Honest states.** Empty, loading and error states say what happened and what to do next.
 
 ## Review against the brief
 
