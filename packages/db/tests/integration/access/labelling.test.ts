@@ -166,6 +166,6 @@ describe("labelling", () => {
     expect(await saveAnnotation(scope, asset.id, { regions: [] }, 0)).toEqual({ version: 1 });
     expect(await saveAnnotation(scope, asset.id, { regions: [] }, 1)).toEqual({ version: 2 });
     await expectCode(saveAnnotation(scope, asset.id, { regions: [] }, 1), "CONFLICT");
-    expect((await assetStatusCounts(scope, project.id)).submitted).toBe(1);
+    expect((await assetStatusCounts(scope, project.id)).in_progress).toBe(1);
   });
 });

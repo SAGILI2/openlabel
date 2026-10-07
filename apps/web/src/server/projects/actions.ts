@@ -15,7 +15,11 @@ import {
   getProjectById,
   moveAssets,
   renameFolder,
+  reviewAsset,
   saveAnnotation,
+  setRequestedReviewers,
+  setReviewRules,
+  submitForReview,
   subtreeFolderIds,
 } from "@openlabel/db";
 import { EXPORTERS } from "@openlabel/exporters";
@@ -83,6 +87,8 @@ export async function createExportAction(input: {
   cropPadding: number;
   /** Export only this folder and its sub-folders; null = whole project. */
   folderId?: string | null;
+  /** `approved` (default) or also pages still in review. */
+  include?: "approved" | "reviewed";
 }): Promise<ActionResult<{ id: string; items: number }>> {
   try {
     const { scope } = await requireOrgScope();
@@ -110,6 +116,7 @@ export async function createExportAction(input: {
       ...(input.folderId
         ? { folderIds: await subtreeFolderIds(scope, project.id, z.uuid().parse(input.folderId)) }
         : {}),
+      include: input.include === "reviewed" ? "reviewed" : "approved",
       assign: (ids) => assignSplits(ids, plan),
     });
     refresh();
@@ -179,6 +186,71 @@ export async function moveAssetsAction(
     );
     refresh();
     return { ok: true, data: { moved } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* ---------- Review ---------- */
+
+const reviewerIdsSchema = z.array(z.uuid()).max(20);
+
+export async function submitForReviewAction(assetId: string, reviewerIds: string[]): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await submitForReview(scope, z.uuid().parse(assetId), reviewerIdsSchema.parse(reviewerIds));
+    refresh();
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setRequestedReviewersAction(
+  assetId: string,
+  reviewerIds: string[],
+): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await setRequestedReviewers(scope, z.uuid().parse(assetId), reviewerIdsSchema.parse(reviewerIds));
+    refresh();
+    return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function reviewAction(
+  assetId: string,
+  input: { decision: string; body: string; version: number },
+): Promise<ActionResult<{ status: string }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const state = await reviewAsset(scope, z.uuid().parse(assetId), {
+      decision: z.enum(["approve", "request_changes", "comment"]).parse(input.decision),
+      body: z.string().max(4000).parse(input.body),
+      version: z.number().int().min(1).parse(input.version),
+    });
+    refresh();
+    return { ok: true, data: { status: state.status } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setReviewRulesAction(
+  projectId: string,
+  input: { requiredApprovals: number; allowSelfApproval: boolean; defaultReviewerIds: string[] },
+): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await setReviewRules(scope, z.uuid().parse(projectId), {
+      requiredApprovals: z.number().int().min(1).max(5).parse(input.requiredApprovals),
+      allowSelfApproval: z.boolean().parse(input.allowSelfApproval),
+      defaultReviewerIds: reviewerIdsSchema.parse(input.defaultReviewerIds),
+    });
+    refresh();
+    return { ok: true, data: undefined };
   } catch (err) {
     return fail(err);
   }

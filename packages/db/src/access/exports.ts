@@ -46,7 +46,15 @@ export async function latestAnnotations(
   projectId: string,
   /** Only assets directly in these folders; undefined = whole project. */
   folderIds?: string[],
+  /** `approved` = only reviewed-and-approved pages; `reviewed` = approved or waiting for review. */
+  include: "approved" | "reviewed" | "all" = "all",
 ): Promise<{ assetId: string; annotationId: string; version: number }[]> {
+  const statuses =
+    include === "approved"
+      ? sql`a.status = 'approved'`
+      : include === "reviewed"
+        ? sql`a.status in ('approved', 'submitted')`
+        : sql`true`;
   const inFolders =
     folderIds === undefined
       ? sql`true`
@@ -60,7 +68,7 @@ export async function latestAnnotations(
     select distinct on (an.asset_id) an.asset_id, an.id as annotation_id, an.version
     from ${annotations} an
     join ${assets} a on a.id = an.asset_id
-    where a.project_id = ${projectId} and a.org_id = ${scope.orgId} and ${inFolders}
+    where a.project_id = ${projectId} and a.org_id = ${scope.orgId} and ${inFolders} and ${statuses}
     order by an.asset_id, an.version desc`);
   return rows.map((r) => ({ assetId: r.asset_id, annotationId: r.annotation_id, version: r.version }));
 }
@@ -79,6 +87,8 @@ export async function createExport(
     options: Record<string, unknown>;
     /** Limit to files directly in these folders (pass a subtree's ids); undefined = whole project. */
     folderIds?: string[];
+    /** Which pages qualify by review state (default: approved only). */
+    include?: "approved" | "reviewed";
     assign: (assetIds: string[]) => Map<string, Split>;
   },
 ): Promise<ExportRow> {
@@ -89,9 +99,15 @@ export async function createExport(
     .where(and(eq(projects.id, input.projectId), eq(projects.orgId, scope.orgId)));
   if (!project) throw new AccessError("NOT_FOUND", "Project not found.");
 
-  const latest = await latestAnnotations(scope, input.projectId, input.folderIds);
+  const include = input.include ?? "approved";
+  const latest = await latestAnnotations(scope, input.projectId, input.folderIds, include);
   if (latest.length === 0) {
-    throw new AccessError("CONFLICT", "Nothing to export yet. Label and save at least one item.");
+    throw new AccessError(
+      "CONFLICT",
+      include === "approved"
+        ? "No approved pages yet. Approve some pages, or include pages still in review."
+        : "Nothing to export yet. Label and send some pages for review.",
+    );
   }
   const splits = input.assign(latest.map((l) => l.assetId));
   const items = latest.flatMap((l) => {

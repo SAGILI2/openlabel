@@ -16,6 +16,7 @@ import {
   renameFolder,
   resolveOrgScope,
   saveAnnotation,
+  submitForReview,
   subtreeFolderIds,
 } from "../../../src/access/index.js";
 import { users } from "../../../src/schema/index.js";
@@ -141,9 +142,11 @@ describe("folders", () => {
     ] as const) {
       const { asset } = await registerAsset(scope, { projectId: project.id, ...file(sha, folder) });
       await saveAnnotation(scope, asset.id, { tags: [], regions: [] }, 0);
+      await submitForReview(scope, asset.id, []);
     }
     const exp = await createExport(scope, {
       projectId: project.id,
+      include: "reviewed",
       name: "a only",
       format: "jsonl",
       options: {},

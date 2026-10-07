@@ -74,10 +74,9 @@ export async function listProjects(scope: OrgScope): Promise<ProjectWithCounts[]
     .select({
       ...columns,
       assetCount: count(assets.id),
-      labelledCount:
-        sql<number>`count(${assets.id}) filter (where ${assets.status} in ('submitted', 'approved'))`.mapWith(
-          Number,
-        ),
+      labelledCount: sql<number>`count(${assets.id}) filter (where ${assets.status} = 'approved')`.mapWith(
+        Number,
+      ),
     })
     .from(projects)
     .leftJoin(assets, eq(assets.projectId, projects.id))
