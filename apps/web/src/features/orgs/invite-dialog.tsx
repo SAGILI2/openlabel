@@ -28,7 +28,7 @@ export function InviteDialog({ assignable, orgName }: { assignable: OrgRole[]; o
         <DialogHeader>
           <DialogTitle>Invite people to {orgName}</DialogTitle>
           <DialogDescription>
-            They get a one-time link that works for 7 days. Copy it and send it to them.
+            We email them a one-time link that works for 7 days. You can copy it too.
           </DialogDescription>
         </DialogHeader>
         <InviteForm assignable={assignable} />

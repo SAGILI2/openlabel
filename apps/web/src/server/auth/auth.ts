@@ -4,7 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { twoFactor } from "better-auth/plugins";
 import type { Config } from "@openlabel/contracts";
-import { countUsers, schema, type Database } from "@openlabel/db";
+import { countUsers, queueEmail, schema, type Database } from "@openlabel/db";
 import { getConfig } from "../env";
 import { getDb } from "../db";
 import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "./password";
@@ -32,7 +32,29 @@ export function createAuth(cfg: Config, db: Database) {
       // Duplicate sign-ups get the same response as new ones, so emails can't be enumerated.
       autoSignIn: false,
       revokeSessionsOnPasswordReset: true,
+      // Links are absolute already (APP_URL); the worker sends them from the queue.
+      sendResetPassword: async ({ user, url }) => {
+        await queueEmail(db, {
+          orgId: null,
+          to: user.email,
+          template: "reset-password",
+          props: { name: user.name, url },
+        });
+      },
       password: { hash: hashPassword, verify: verifyPassword },
+    },
+    emailVerification: {
+      // Confirmation is offered, not required, so invited teammates can start straight away.
+      sendOnSignUp: true,
+      autoSignInAfterVerification: false,
+      sendVerificationEmail: async ({ user, url }) => {
+        await queueEmail(db, {
+          orgId: null,
+          to: user.email,
+          template: "verify-email",
+          props: { name: user.name, url },
+        });
+      },
     },
     session: {
       expiresIn: 7 * DAY,
@@ -51,6 +73,8 @@ export function createAuth(cfg: Config, db: Database) {
       customRules: {
         "/sign-in/*": { window: 60, max: 5 },
         "/sign-up/*": { window: 60, max: 3 },
+        "/request-password-reset": { window: 60, max: 3 },
+        "/send-verification-email": { window: 60, max: 3 },
         "/two-factor/*": { window: 60, max: 5 },
       },
     },

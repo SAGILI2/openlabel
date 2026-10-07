@@ -46,6 +46,7 @@ export {
   type LabellingState,
 } from "./assets.js";
 export { claimJobs, completeJob, enqueueJob, failJob, type JobRow } from "./jobs.js";
+export { queueEmail, redactSentEmail, SEND_EMAIL_JOB, type QueuedEmail } from "./mail.js";
 export {
   loadPrelabelTarget,
   markPrelabelFailed,

@@ -16,3 +16,4 @@ __pycache__/
 .venv/
 .drift-check/
 .playwright-mcp/
+packages/emails/preview/

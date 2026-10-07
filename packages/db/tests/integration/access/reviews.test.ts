@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createDb } from "../../../src/client/index.js";
 import { runMigrations } from "../../../src/migrate/run.js";
@@ -17,7 +18,7 @@ import {
   submitForReview,
   type OrgRole,
 } from "../../../src/access/index.js";
-import { users } from "../../../src/schema/index.js";
+import { jobs, users } from "../../../src/schema/index.js";
 import { startPostgres } from "../../support/postgres.js";
 
 let pg: Awaited<ReturnType<typeof startPostgres>>;
@@ -160,6 +161,28 @@ describe("review workflow", () => {
       reviewAsset(labeller.scope, asset.id, { decision: "approve", body: "", version: 1 }),
       "FORBIDDEN",
     );
+  });
+
+  it("queues one email per reviewer and per version, and tells the labeller about requested changes", async () => {
+    const { labeller, rev1, rev2, asset } = await setup();
+    const mail = async () =>
+      (await conn.db.select({ payload: jobs.payload }).from(jobs).where(eq(jobs.kind, "send-email"))).map(
+        (j) => [j.payload.template, j.payload.to],
+      );
+    await submitForReview(labeller.scope, asset.id, [rev1.user.id, rev2.user.id]);
+    await submitForReview(labeller.scope, asset.id, [rev1.user.id]); // same version: no resend
+    expect((await mail()).filter(([t]) => t === "review-requested")).toEqual([
+      ["review-requested", "rev1@x.test"],
+      ["review-requested", "rev2@x.test"],
+    ]);
+    await reviewAsset(rev1.scope, asset.id, { decision: "request_changes", body: "Fix line 2", version: 1 });
+    expect((await mail()).filter(([t]) => t === "changes-requested")).toEqual([
+      ["changes-requested", "lab@x.test"],
+    ]);
+    const [job] = (
+      await conn.db.select({ payload: jobs.payload }).from(jobs).where(eq(jobs.kind, "send-email"))
+    ).filter((j) => j.payload.template === "review-requested");
+    expect(job?.payload.props).toMatchObject({ pageName: "a.png", path: `/projects/p/label/${asset.id}` });
   });
 
   it("adds the project's default reviewers on submit", async () => {

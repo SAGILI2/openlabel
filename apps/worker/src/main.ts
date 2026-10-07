@@ -1,13 +1,21 @@
 /**
- * OpenLabel worker: runs background jobs (pre-labelling, exports). Stateless, so throughput
+ * OpenLabel worker: runs background jobs (pre-labelling, exports, email). Stateless, so throughput
  * scales by running more copies (ADR-0005).
  */
 import { hostname } from "node:os";
 import { loadConfig } from "@openlabel/contracts";
-import { createDb, markExportFailed, markPrelabelFailed } from "@openlabel/db";
+import {
+  createDb,
+  markExportFailed,
+  markPrelabelFailed,
+  redactSentEmail,
+  SEND_EMAIL_JOB,
+} from "@openlabel/db";
+import { createMailTransport } from "@openlabel/emails";
 import { createStore } from "@openlabel/storage";
 import { runExport } from "./jobs/export.js";
 import { runPrelabel } from "./jobs/prelabel.js";
+import { runSendEmail } from "./jobs/send-email.js";
 import { startRunner } from "./runner.js";
 
 function log(msg: string, fields: Record<string, unknown> = {}): void {
@@ -18,6 +26,7 @@ const cfg = loadConfig(process.env);
 const conn = createDb({ url: cfg.DATABASE_URL, max: cfg.WORKER_CONCURRENCY + 2 });
 const store = createStore(cfg);
 const workerId = `${hostname()}:${String(process.pid)}`;
+const transport = createMailTransport(cfg, log);
 
 // One runner per job kind, so a long export never holds up pre-labelling.
 const runners = [
@@ -45,8 +54,24 @@ const runners = [
     },
     log,
   }),
+  startRunner({
+    db: conn.db,
+    workerId,
+    kind: SEND_EMAIL_JOB,
+    concurrency: 2,
+    handler: async (job) => {
+      await runSendEmail({ transport, appUrl: cfg.APP_URL, log }, job);
+      await redactSentEmail(conn.db, job.id);
+    },
+    log,
+  }),
 ];
-log("worker started", { workerId, concurrency: cfg.WORKER_CONCURRENCY, ocr: cfg.OCR_SERVICE_URL });
+log("worker started", {
+  workerId,
+  concurrency: cfg.WORKER_CONCURRENCY,
+  ocr: cfg.OCR_SERVICE_URL,
+  mail: transport.name,
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

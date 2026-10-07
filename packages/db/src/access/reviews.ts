@@ -11,6 +11,7 @@ import {
   users,
 } from "../schema/index.js";
 import { AccessError } from "./errors.js";
+import { queueEmail } from "./mail.js";
 import { requireRole, type OrgRole, type OrgScope } from "./scope.js";
 
 export type ReviewDecision = (typeof reviews.$inferSelect)["decision"];
@@ -182,7 +183,53 @@ export async function submitForReview(
       resourceId: assetId,
       details: { version, reviewers: requested },
     });
+    if (requested.length > 0) await notifyReviewers(tx, scope, assetId, version, requested);
   });
+}
+
+type Tx = Parameters<Parameters<OrgScope["db"]["transaction"]>[0]>[0];
+
+/** Where the page lives, for links and subjects in notification emails. */
+async function pageContext(tx: Tx, assetId: string) {
+  const [row] = await tx
+    .select({ pageName: assets.originalName, projectName: projects.name, projectSlug: projects.slug })
+    .from(assets)
+    .innerJoin(projects, eq(projects.id, assets.projectId))
+    .where(eq(assets.id, assetId));
+  if (!row) throw new AccessError("NOT_FOUND", "Item not found.");
+  return { ...row, path: `/projects/${row.projectSlug}/label/${assetId}` };
+}
+
+async function userName(tx: Tx, userId: string): Promise<string> {
+  const [row] = await tx.select({ name: users.name }).from(users).where(eq(users.id, userId));
+  return row?.name ?? "A teammate";
+}
+
+/** One email per requested reviewer per version; resubmitting the same version doesn't resend. */
+async function notifyReviewers(
+  tx: Tx,
+  scope: OrgScope,
+  assetId: string,
+  version: number,
+  reviewerIds: string[],
+) {
+  const others = reviewerIds.filter((id) => id !== scope.userId);
+  if (others.length === 0) return;
+  const page = await pageContext(tx, assetId);
+  const requesterName = await userName(tx, scope.userId);
+  const recipients = await tx
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(inArray(users.id, others));
+  for (const r of recipients) {
+    await queueEmail(tx, {
+      orgId: scope.orgId,
+      to: r.email,
+      template: "review-requested",
+      props: { requesterName, projectName: page.projectName, pageName: page.pageName, path: page.path },
+      dedupeKey: `review-requested:${assetId}:${String(version)}:${r.id}`,
+    });
+  }
 }
 
 /** Adds or removes requested reviewers without resubmitting. */
@@ -254,6 +301,32 @@ export async function reviewAsset(
       resourceId: assetId,
       details: { version },
     });
+    // Tell whoever sent the page that it needs changes.
+    if (
+      input.decision === "request_changes" &&
+      asset.submittedByUserId &&
+      asset.submittedByUserId !== scope.userId
+    ) {
+      const [submitter] = await tx
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, asset.submittedByUserId));
+      if (submitter) {
+        const page = await pageContext(tx, assetId);
+        await queueEmail(tx, {
+          orgId: scope.orgId,
+          to: submitter.email,
+          template: "changes-requested",
+          props: {
+            reviewerName: await userName(tx, scope.userId),
+            projectName: page.projectName,
+            pageName: page.pageName,
+            comment: input.body.trim().slice(0, 1000),
+            path: page.path,
+          },
+        });
+      }
+    }
   });
 
   const state = await getReviewState(scope, assetId);

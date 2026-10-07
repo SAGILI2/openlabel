@@ -5,6 +5,7 @@ import { execSync } from "node:child_process";
 
 const ALLOWED = new Set([
   "MIT",
+  "MIT-0",
   "Apache-2.0",
   "ISC",
   "BSD-2-Clause",

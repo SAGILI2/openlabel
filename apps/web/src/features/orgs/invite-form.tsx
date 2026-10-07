@@ -88,7 +88,8 @@ export function InviteForm({ assignable }: { assignable: OrgRole[] }) {
         >
           <p className="flex items-start gap-2 font-medium">
             <Link2 className="mt-0.5 size-4 shrink-0" aria-hidden />
-            Invitation created for {created.email}. Share this link; it works once and expires in 7 days.
+            Invitation emailed to {created.email}. You can also share this link; it works once and expires in
+            7 days.
           </p>
           <div className="flex min-w-0 items-center gap-2">
             <code className="bg-card text-foreground min-w-0 flex-1 truncate rounded border px-2 py-1.5 font-mono text-[12px]">

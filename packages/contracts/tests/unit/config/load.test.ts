@@ -61,4 +61,15 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...base, AUTH_PASSWORD_MIN_LENGTH: "10" }).AUTH_PASSWORD_MIN_LENGTH).toBe(10);
     expect(() => loadConfig({ ...base, AUTH_PASSWORD_MIN_LENGTH: "4" })).toThrow(/AUTH_PASSWORD_MIN_LENGTH/);
   });
+
+  it("logs mail by default and needs a host for SMTP", () => {
+    expect(loadConfig(base).MAIL_TRANSPORT).toBe("log");
+    expect(() => loadConfig({ ...base, MAIL_TRANSPORT: "smtp" })).toThrow(/SMTP_HOST/);
+    const smtp = loadConfig({ ...base, MAIL_TRANSPORT: "smtp", SMTP_HOST: "mailpit", SMTP_PORT: "1025" });
+    expect([smtp.SMTP_HOST, smtp.SMTP_PORT, smtp.SMTP_SECURE]).toEqual(["mailpit", 1025, false]);
+    expect(() => loadConfig({ ...base, SMTP_USER: "u" })).toThrow(/SMTP_PASSWORD/);
+    expect(() => loadConfig({ ...base, MAIL_REDIRECT_ALL_TO: "not-an-email" })).toThrow(
+      /MAIL_REDIRECT_ALL_TO/,
+    );
+  });
 });
