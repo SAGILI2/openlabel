@@ -20,6 +20,11 @@ export function assetKey(orgId: string, projectId: string, sha256: string, exten
   return `orgs/${orgId}/projects/${projectId}/assets/${sha256}${ext ? `.${ext}` : ""}`;
 }
 
+/** Key for an export archive. */
+export function exportKey(orgId: string, projectId: string, exportId: string): string {
+  return `orgs/${orgId}/projects/${projectId}/exports/${exportId}.zip`;
+}
+
 /** Rejects keys that could escape the store root (`..`, absolute paths, backslashes). */
 export function assertSafeKey(key: string): void {
   if (

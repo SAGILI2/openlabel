@@ -53,3 +53,15 @@ export {
   storePrediction,
   type PrelabelTarget,
 } from "./prelabel.js";
+export {
+  createExport,
+  getExport,
+  latestAnnotations,
+  listExports,
+  loadExportJob,
+  markExportFailed,
+  markExportReady,
+  markExportRunning,
+  type ExportJobData,
+  type ExportRow,
+} from "./exports.js";

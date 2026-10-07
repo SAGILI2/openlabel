@@ -10,3 +10,4 @@ export * from "./ocr/index.js";
 export * from "./value-types/index.js";
 export * from "./tasks/index.js";
 export * from "./projects/index.js";
+export * from "./datasets/index.js";

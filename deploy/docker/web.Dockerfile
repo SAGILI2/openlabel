@@ -17,6 +17,7 @@ COPY apps/worker/package.json apps/worker/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/db/package.json packages/db/
 COPY packages/storage/package.json packages/storage/
+COPY packages/exporters/package.json packages/exporters/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 # ---- build: compile packages and the Next.js standalone server
@@ -30,6 +31,7 @@ COPY apps/worker apps/worker
 RUN pnpm --filter @openlabel/contracts build \
  && pnpm --filter @openlabel/db build \
  && pnpm --filter @openlabel/storage build \
+ && pnpm --filter @openlabel/exporters build \
  && pnpm --filter @openlabel/worker build \
  && OPENLABEL_BUILD_ID="${OPENLABEL_BUILD_ID:-$(date +%s)}" pnpm --filter @openlabel/web build \
  && pnpm --filter @openlabel/worker deploy --prod --legacy /worker

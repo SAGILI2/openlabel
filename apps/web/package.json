@@ -17,6 +17,7 @@
     "@node-rs/argon2": "2.2.2",
     "@openlabel/contracts": "workspace:*",
     "@openlabel/db": "workspace:*",
+    "@openlabel/exporters": "workspace:*",
     "@openlabel/storage": "workspace:*",
     "better-auth": "1.7.7",
     "class-variance-authority": "^0.7.1",

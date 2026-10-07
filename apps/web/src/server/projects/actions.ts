@@ -1,7 +1,14 @@
 "use server";
 import { redirect } from "next/navigation";
-import { imageAnnotationSchema, parseCreateProjectInput } from "@openlabel/contracts";
-import { AccessError, createProject, saveAnnotation } from "@openlabel/db";
+import {
+  assignSplits,
+  imageAnnotationSchema,
+  parseCreateProjectInput,
+  splitPlanSchema,
+} from "@openlabel/contracts";
+import { AccessError, createExport, createProject, getProjectById, saveAnnotation } from "@openlabel/db";
+import { EXPORTERS } from "@openlabel/exporters";
+import { refresh } from "next/cache";
 import { z } from "zod";
 import { requireOrgScope } from "../orgs";
 import { getTaskTypeRegistry } from "../tasks";
@@ -49,6 +56,44 @@ export async function saveAnnotationAction(
       z.number().int().min(0).parse(baseVersion),
     );
     return { ok: true, data: saved };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Freezes the project's labelled items into a new export and queues the files to be written. */
+export async function createExportAction(input: {
+  projectId: string;
+  name: string;
+  format: string;
+  train: number;
+  val: number;
+  test: number;
+  cropPadding: number;
+}): Promise<ActionResult<{ id: string; items: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const project = await getProjectById(scope, z.uuid().parse(input.projectId));
+    const exporter = EXPORTERS.get(input.format);
+    if (!exporter || !exporter.taskTypes.includes(project.taskType)) {
+      return { ok: false, error: "That format isn't available for this project." };
+    }
+    const plan = splitPlanSchema.parse({
+      train: input.train,
+      val: input.val,
+      test: input.test,
+      seed: project.id,
+    });
+    const name = z.string().trim().min(1, "Give the export a name.").max(120).parse(input.name);
+    const row = await createExport(scope, {
+      projectId: project.id,
+      name,
+      format: exporter.id,
+      options: { split: plan, cropPadding: z.number().int().min(0).max(32).parse(input.cropPadding) },
+      assign: (ids) => assignSplits(ids, plan),
+    });
+    refresh();
+    return { ok: true, data: { id: row.id, items: row.itemCount } };
   } catch (err) {
     return fail(err);
   }

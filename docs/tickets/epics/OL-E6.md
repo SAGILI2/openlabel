@@ -14,6 +14,7 @@ Frozen dataset snapshots and the exporter, destination, launcher and tracker ada
 
 ## Issues
 
+- OL-47: Dataset export MVP: freeze labelled assets, split by asset, export docTR / JSONL / COCO as a ZIP
 - OL-27: Snapshots: freeze approved annotations with a split
 - OL-28: Adapter framework: exporter, destination, launcher, tracker
 - OL-29: First adapters: docTR, HF Parquet, JSONL; local, S3, HF Hub, Kaggle; local GPU, Kaggle; MLflow

@@ -1,22 +1,25 @@
 {
-  "name": "@openlabel/worker",
+  "name": "@openlabel/exporters",
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "node --watch dist/main.js",
-    "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src tests",
     "test": "vitest run"
   },
   "dependencies": {
     "@openlabel/contracts": "workspace:*",
-    "@openlabel/db": "workspace:*",
-    "@openlabel/exporters": "workspace:*",
-    "@openlabel/storage": "workspace:*"
+    "fflate": "^0.8.3",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/node": "^24.19.1"
