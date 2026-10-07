@@ -22,6 +22,8 @@ export const users = pgTable(
     email: text().notNull(),
     name: text().notNull(),
     emailVerified: boolean().notNull().default(false),
+    image: text(),
+    twoFactorEnabled: boolean().notNull().default(false),
     ...timestamps,
   },
   (t) => [uniqueIndex("users_email_uq").on(t.email)],

@@ -9,7 +9,7 @@ export const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), ".
 
 /** Applies all pending migrations, holding a single connection for the duration. */
 export async function runMigrations(url: string): Promise<void> {
-  const sql = postgres(url, { max: 1 });
+  const sql = postgres(url, { max: 1, onnotice: () => undefined });
   try {
     await migrate(drizzle(sql), { migrationsFolder });
   } finally {

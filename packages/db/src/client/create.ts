@@ -10,7 +10,7 @@ export interface DbOptions {
 
 /** Creates a pooled, typed database client. Call `close()` on shutdown. */
 export function createDb({ url, max = 10 }: DbOptions) {
-  const sql = postgres(url, { max, prepare: true });
+  const sql = postgres(url, { max, prepare: true, onnotice: () => undefined });
   const db = drizzle(sql, { schema, casing: "snake_case" });
   return {
     db,
