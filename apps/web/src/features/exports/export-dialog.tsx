@@ -65,15 +65,19 @@ export function ExportDialog({
   projectId,
   formats,
   labelledCount,
+  inReviewCount = 0,
   folders = [],
 }: {
   projectId: string;
   formats: FormatOption[];
   labelledCount: number;
+  /** Pages waiting for review, offered as an opt-in. */
+  inReviewCount?: number;
   /** Folders that can be exported on their own (with their sub-folders). */
   folders?: { id: string; path: string }[];
 }) {
   const [folderId, setFolderId] = useState<string>("all");
+  const [include, setInclude] = useState<"approved" | "reviewed">("approved");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(`Export ${new Date().toISOString().slice(0, 10)}`);
   const [format, setFormat] = useState(formats[0]?.id ?? "");
@@ -94,6 +98,7 @@ export function ExportDialog({
         ...split,
         cropPadding: padding,
         folderId: folderId === "all" ? null : folderId,
+        include,
       });
       if (!result.ok) {
         setError(result.error);
@@ -131,6 +136,34 @@ export function ExportDialog({
               setName(e.target.value);
             }}
           />
+          <div className="grid gap-2">
+            <Label id="export-include-label">Include</Label>
+            <RadioGroup
+              value={include}
+              onValueChange={(v) => {
+                setInclude(v === "reviewed" ? "reviewed" : "approved");
+              }}
+              aria-labelledby="export-include-label"
+              className="gap-1.5"
+            >
+              {(
+                [
+                  ["approved", "Approved pages only", labelledCount],
+                  ["reviewed", "Approved + waiting for review", labelledCount + inReviewCount],
+                ] as const
+              ).map(([value, title, n]) => (
+                <label
+                  key={value}
+                  htmlFor={`include-${value}`}
+                  className="flex cursor-pointer items-center gap-2.5 text-[13px]"
+                >
+                  <RadioGroupItem id={`include-${value}`} value={value} />
+                  <span className="flex-1">{title}</span>
+                  <span className="text-muted-foreground tabular-nums">{n}</span>
+                </label>
+              ))}
+            </RadioGroup>
+          </div>
           {folders.length > 0 && (
             <div className="grid gap-1.5">
               <Label htmlFor="export-folder">What to export</Label>

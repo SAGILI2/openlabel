@@ -7,3 +7,4 @@ export * from "./auth.js";
 export * from "./invitations.js";
 export * from "./labelling.js";
 export * from "./exports.js";
+export * from "./reviews.js";

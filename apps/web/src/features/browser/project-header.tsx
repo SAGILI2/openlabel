@@ -11,6 +11,7 @@ export function ProjectHeader({
   total,
   labelled,
   ocrRunning,
+  inReview,
 }: {
   slug: string;
   name: string;
@@ -18,12 +19,14 @@ export function ProjectHeader({
   total: number;
   labelled: number;
   ocrRunning: number;
+  inReview: number;
 }) {
   const pathname = usePathname();
   const base = `/projects/${slug}`;
   const tabs = [
     { href: base, label: "Files", active: pathname === base },
     { href: `${base}/exports`, label: "Exports", active: pathname.startsWith(`${base}/exports`) },
+    { href: `${base}/settings`, label: "Settings", active: pathname.startsWith(`${base}/settings`) },
   ];
   const pct = total ? Math.round((labelled / total) * 100) : 0;
   return (
@@ -36,8 +39,9 @@ export function ProjectHeader({
             <div className="bg-success h-full" style={{ width: `${String(pct)}%` }} />
           </div>
           <span>
-            <span className="text-foreground font-medium">{labelled}</span> of {total} labelled
+            <span className="text-foreground font-medium">{labelled}</span> of {total} approved
           </span>
+          {inReview > 0 && <span>· {inReview} in review</span>}
           {ocrRunning > 0 && <span>· {ocrRunning} reading</span>}
         </div>
       </div>

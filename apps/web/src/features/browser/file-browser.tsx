@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Circle,
   CircleDashed,
+  Eye,
   FolderInput,
   FolderPlus,
   LayoutGrid,
@@ -10,6 +11,7 @@ import {
   Loader2,
   Play,
   Upload,
+  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -45,17 +47,19 @@ export interface BrowserFile {
   folderPath: string | null;
 }
 
-type Filter = "all" | "todo" | "done" | "ocr";
+type Filter = "all" | "todo" | "review" | "done" | "ocr";
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "todo", label: "To do" },
-  { id: "done", label: "Done" },
+  { id: "review", label: "In review" },
+  { id: "done", label: "Approved" },
   { id: "ocr", label: "OCR running" },
 ];
 
 function bucket(status: BrowserFile["status"]): Exclude<Filter, "all"> {
-  if (status === "submitted" || status === "approved") return "done";
+  if (status === "approved") return "done";
+  if (status === "submitted") return "review";
   if (status === "new" || status === "prelabelling") return "ocr";
   return "todo";
 }
@@ -65,7 +69,19 @@ function StatusMark({ status }: { status: BrowserFile["status"] }) {
   if (b === "done")
     return (
       <span className="text-success inline-flex items-center gap-1.5 text-[12px]">
-        <CheckCircle2 className="size-3.5" /> Done
+        <CheckCircle2 className="size-3.5" /> Approved
+      </span>
+    );
+  if (b === "review")
+    return (
+      <span className="text-brand inline-flex items-center gap-1.5 text-[12px]">
+        <Eye className="size-3.5" /> In review
+      </span>
+    );
+  if (status === "rejected")
+    return (
+      <span className="text-destructive inline-flex items-center gap-1.5 text-[12px]">
+        <XCircle className="size-3.5" /> Changes requested
       </span>
     );
   if (b === "ocr")
@@ -123,7 +139,7 @@ export function FileBrowser(props: Props) {
     [props.files, filter],
   );
   const counts = useMemo(() => {
-    const c = { all: props.files.length, todo: 0, done: 0, ocr: 0 };
+    const c = { all: props.files.length, todo: 0, review: 0, done: 0, ocr: 0 };
     for (const f of props.files) c[bucket(f.status)] += 1;
     return c;
   }, [props.files]);

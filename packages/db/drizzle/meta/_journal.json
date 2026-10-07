@@ -50,6 +50,13 @@
       "when": 1791367449887,
       "tag": "0006_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791369219304,
+      "tag": "0007_reviews",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,7 @@ export default async function ProjectLayout({
         total={tree.totalCount}
         labelled={counts.labelled}
         ocrRunning={counts.ocrRunning}
+        inReview={counts.inReview}
       />
       {children}
     </div>

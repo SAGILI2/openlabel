@@ -14,7 +14,7 @@ export default async function ProjectExportsPage({ params }: { params: Promise<{
   const paths = folderPaths(tree.roots);
 
   return (
-    <div className="grid w-full max-w-[1100px] content-start gap-4 px-4 py-5 sm:px-6">
+    <div className="grid w-full content-start gap-4 px-4 py-5 sm:px-6">
       <AutoRefresh active={building} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="text-muted-foreground max-w-[640px] text-[13px]">
@@ -25,6 +25,7 @@ export default async function ProjectExportsPage({ params }: { params: Promise<{
           <ExportDialog
             projectId={project.id}
             labelledCount={counts.labelled}
+            inReviewCount={counts.inReview}
             folders={[...paths.entries()]
               .map(([id, path]) => ({ id, path }))
               .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))}

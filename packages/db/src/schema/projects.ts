@@ -1,5 +1,15 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { id, timestamps } from "./columns.js";
 import { organizations } from "./identity.js";
 
@@ -22,12 +32,17 @@ export const projects = pgTable(
      * task-type registry by the application; the constraint keeps it consistent with `modality`.
      */
     taskType: text("task").notNull(),
+    /** Approvals a page needs before it counts as approved (review rules, like branch protection). */
+    requiredApprovals: integer().notNull().default(1),
+    /** Lets the person who submitted a page approve it themselves (useful for solo projects). */
+    allowSelfApproval: boolean().notNull().default(false),
     ...timestamps,
   },
   (t) => [
     uniqueIndex("projects_org_slug_uq").on(t.orgId, t.slug),
     index("projects_org_idx").on(t.orgId),
     index("projects_task_type_idx").on(t.taskType),
+    check("projects_required_approvals_range", sql`${t.requiredApprovals} between 1 and 5`),
     check(
       "projects_task_type_matches_modality",
       sql`${t.taskType} ~ ('^' || ${t.modality}::text || '\\.[a-z][a-z0-9-]*$')`,

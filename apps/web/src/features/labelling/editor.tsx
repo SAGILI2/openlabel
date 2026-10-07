@@ -2,12 +2,14 @@
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   ChevronLeft,
+  CircleDot,
   ChevronRight,
   Hand,
   Maximize,
   MousePointer2,
-  Save,
+  Send,
   ScanSearch,
   Square,
   Trash2,
@@ -22,7 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type 
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { saveAnnotationAction } from "@/server/projects/actions";
+import { ReviewPanel, type ReviewerOption, type ReviewView } from "@/features/review";
+import { saveAnnotationAction, submitForReviewAction } from "@/server/projects/actions";
 import type { CanvasHandle, Tool } from "./canvas-stage";
 import { annotationFromWords, LOW_CONFIDENCE, type Box, type EditableWord } from "./regions";
 import { WordZoom } from "./word-zoom";
@@ -51,6 +54,9 @@ export interface EditorProps {
   backHref: string;
   /** Pages in the current folder, in order, for the film-strip and prev/next. */
   strip: StripItem[];
+  review: ReviewView;
+  reviewers: ReviewerOption[];
+  canReview: boolean;
 }
 
 function ToolButton({
@@ -107,6 +113,9 @@ export function Editor(props: EditorProps) {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [onlyLow, setOnlyLow] = useState(false);
+  const [panel, setPanel] = useState<"label" | "review">(
+    props.review.status === "submitted" && props.canReview ? "review" : "label",
+  );
   const [pending, startTransition] = useTransition();
   const textRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
@@ -125,13 +134,38 @@ export function Editor(props: EditorProps) {
     canvasRef.current?.zoom(kind);
   };
 
+  // What gets saved: boxes and text. OCR confidence is review progress, not label data, so
+  // ticking a word "checked" never counts as a change.
+  const signature = (ws: EditableWord[]) =>
+    JSON.stringify(
+      ws.map((w) => [
+        w.id,
+        w.text,
+        Math.round(w.box.x),
+        Math.round(w.box.y),
+        Math.round(w.box.width),
+        Math.round(w.box.height),
+      ]),
+    );
+  const savedSignature = useRef(signature(props.initialWords));
+
   const update = useCallback((fn: (ws: EditableWord[]) => EditableWord[]) => {
-    setWords(fn);
-    setDirty(true);
+    setWords((prev) => {
+      const nextWords = fn(prev);
+      setDirty(signature(nextWords) !== savedSignature.current);
+      return nextWords;
+    });
   }, []);
 
+  /** Saves a draft version if the labels changed; then optionally navigates. */
   const save = useCallback(
     (then?: string) => {
+      const sig = signature(words);
+      if (sig === savedSignature.current) {
+        setDirty(false);
+        if (then) router.push(then);
+        return;
+      }
       setError(null);
       startTransition(async () => {
         const result = await saveAnnotationAction(props.assetId, annotationFromWords(words), version);
@@ -139,15 +173,59 @@ export function Editor(props: EditorProps) {
           setError(result.error);
           return;
         }
+        savedSignature.current = sig;
         setVersion(result.data.version);
         setDirty(false);
         setSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         if (then) router.push(then);
-        else router.refresh();
       });
     },
     [props.assetId, words, version, router],
   );
+
+  const [submitting, setSubmitting] = useState(false);
+  /** Labeller can submit while the page is a draft or was sent back with changes requested. */
+  const submittable = !["submitted", "approved"].includes(props.review.status);
+
+  /** Final step: flush any pending draft, then send the page to reviewers. */
+  async function submit() {
+    setSubmitting(true);
+    setError(null);
+    const sig = signature(words);
+    if (sig !== savedSignature.current || version === 0) {
+      const saved = await saveAnnotationAction(props.assetId, annotationFromWords(words), version);
+      if (!saved.ok) {
+        setError(saved.error);
+        setSubmitting(false);
+        return;
+      }
+      savedSignature.current = sig;
+      setVersion(saved.data.version);
+      setDirty(false);
+    }
+    const sent = await submitForReviewAction(
+      props.assetId,
+      props.review.requested.map((r) => r.userId),
+    );
+    setSubmitting(false);
+    if (!sent.ok) {
+      setError(sent.error);
+      return;
+    }
+    setPanel("review");
+    router.refresh();
+  }
+
+  // Autosave: a draft version 1.5 s after the last change, so work is never lost.
+  useEffect(() => {
+    if (!dirty || pending) return;
+    const t = setTimeout(() => {
+      save();
+    }, 1500);
+    return () => {
+      clearTimeout(t);
+    };
+  }, [dirty, pending, words, save]);
 
   function onDraw(box: Box) {
     const id = `u${Date.now().toString(36)}`;
@@ -173,7 +251,7 @@ export function Editor(props: EditorProps) {
   /** Marks the selected word as checked (clears its low-confidence flag) and moves on. */
   function accept() {
     if (!selected) return;
-    update((ws) => ws.map((w) => (w.id === selected.id ? { ...w, conf: null } : w)));
+    setWords((ws) => ws.map((w) => (w.id === selected.id ? { ...w, conf: null } : w)));
     step(1);
   }
 
@@ -251,15 +329,17 @@ export function Editor(props: EditorProps) {
 
   const status = error
     ? error
-    : dirty
-      ? "Unsaved changes"
-      : savedAt
-        ? `Saved ${savedAt}`
-        : version > 0
-          ? `Version ${String(version)}`
-          : props.source === "prediction"
-            ? "OCR draft"
-            : "";
+    : pending
+      ? "Saving draft…"
+      : dirty
+        ? "Editing…"
+        : savedAt
+          ? `Draft saved ${savedAt}`
+          : version > 0
+            ? "All changes saved"
+            : props.source === "prediction"
+              ? "OCR draft, not edited yet"
+              : "";
 
   return (
     <div className="bg-background flex h-dvh flex-col">
@@ -312,17 +392,38 @@ export function Editor(props: EditorProps) {
           >
             <ChevronRight className="size-4" />
           </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              save();
-            }}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-60"
-          >
-            <Save className="size-3.5" />
-            {pending ? "Saving…" : "Save"}
-          </button>
+          {submittable ? (
+            <button
+              type="button"
+              disabled={pending || submitting || version === 0}
+              title={version === 0 ? "Edit or check the page first" : "Send this page to reviewers"}
+              onClick={() => {
+                void submit();
+              }}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-60"
+            >
+              <Send className="size-3.5" />
+              {submitting
+                ? "Sending…"
+                : props.review.status === "rejected"
+                  ? "Resubmit"
+                  : "Submit for review"}
+            </button>
+          ) : (
+            <span
+              className={cn(
+                "hidden items-center gap-1.5 text-[12px] font-medium sm:flex",
+                props.review.status === "approved" ? "text-success" : "text-[#9a6b00] dark:text-[#E8A400]",
+              )}
+            >
+              {props.review.status === "approved" ? (
+                <CheckCircle2 className="size-3.5" aria-hidden />
+              ) : (
+                <CircleDot className="size-3.5" aria-hidden />
+              )}
+              {props.review.status === "approved" ? "Approved" : "In review"}
+            </span>
+          )}
           {next && (
             <button
               type="button"
@@ -332,7 +433,7 @@ export function Editor(props: EditorProps) {
               }}
               className="hover:bg-muted hidden h-8 items-center gap-1 rounded-md border px-3 text-[13px] font-medium sm:flex"
             >
-              Save & next <ChevronRight className="size-3.5" />
+              Next <ChevronRight className="size-3.5" />
             </button>
           )}
         </div>
@@ -436,133 +537,182 @@ export function Editor(props: EditorProps) {
 
         {/* Inspector */}
         <aside className="bg-card flex max-h-[45dvh] min-h-0 min-w-0 flex-col border-t md:max-h-none md:border-t-0 md:border-l">
-          <div className="grid gap-3 border-b p-4">
-            {selected ? (
-              <>
-                <WordZoom
-                  imageUrl={props.imageUrl}
-                  box={selected.box}
-                  imageWidth={props.imageWidth}
-                  imageHeight={props.imageHeight}
-                />
-                <div className="grid gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="word-text" className="text-[12px] font-medium">
-                      Text
-                    </label>
-                    {selected.conf !== null && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 text-[11px] tabular-nums",
-                          isLow(selected) ? "text-[#D9480F]" : "text-muted-foreground",
-                        )}
-                      >
-                        {isLow(selected) && <TriangleAlert className="size-3" />}
-                        OCR {Math.round(selected.conf * 100)}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Input
-                      id="word-text"
-                      ref={textRef}
-                      value={selected.text}
-                      className="h-10 font-mono text-[15px]"
-                      autoComplete="off"
-                      spellCheck={false}
-                      onChange={(e) => {
-                        const text = e.target.value;
-                        update((ws) =>
-                          ws.map((w) => (w.id === selected.id ? { ...w, text, conf: null } : w)),
-                        );
-                      }}
+          <div className="flex shrink-0 gap-4 border-b px-4" role="tablist" aria-label="Inspector">
+            {(
+              [
+                ["label", "Label"],
+                ["review", "Review"],
+              ] as const
+            ).map(([id, title]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={panel === id}
+                onClick={() => {
+                  setPanel(id);
+                }}
+                className={cn(
+                  "-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-[13px] font-medium",
+                  panel === id
+                    ? "border-foreground"
+                    : "text-muted-foreground hover:text-foreground border-transparent",
+                )}
+              >
+                {title}
+                {id === "review" && props.review.status === "approved" && (
+                  <Check className="text-success size-3.5" aria-label="approved" />
+                )}
+                {id === "review" && props.review.status === "rejected" && (
+                  <span className="bg-destructive size-1.5 rounded-full" aria-label="changes requested" />
+                )}
+              </button>
+            ))}
+          </div>
+          {panel === "review" ? (
+            <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto p-4">
+              <ReviewPanel
+                assetId={props.assetId}
+                review={{ ...props.review, currentVersion: version }}
+                reviewers={props.reviewers}
+                canReview={props.canReview}
+                dirty={dirty}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 border-b p-4">
+                {selected ? (
+                  <>
+                    <WordZoom
+                      imageUrl={props.imageUrl}
+                      box={selected.box}
+                      imageWidth={props.imageWidth}
+                      imageHeight={props.imageHeight}
                     />
-                    <button
-                      type="button"
-                      aria-label="Correct, next word (Enter)"
-                      title="Correct, next word (Enter)"
-                      onClick={accept}
-                      className="hover:bg-muted grid size-10 shrink-0 place-items-center rounded-md border"
-                    >
-                      <Check className="size-4" />
-                    </button>
+                    <div className="grid gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="word-text" className="text-[12px] font-medium">
+                          Text
+                        </label>
+                        {selected.conf !== null && (
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 text-[11px] tabular-nums",
+                              isLow(selected) ? "text-[#D9480F]" : "text-muted-foreground",
+                            )}
+                          >
+                            {isLow(selected) && <TriangleAlert className="size-3" />}
+                            OCR {Math.round(selected.conf * 100)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Input
+                          id="word-text"
+                          ref={textRef}
+                          value={selected.text}
+                          className="h-10 font-mono text-[15px]"
+                          autoComplete="off"
+                          spellCheck={false}
+                          onChange={(e) => {
+                            const text = e.target.value;
+                            update((ws) =>
+                              ws.map((w) => (w.id === selected.id ? { ...w, text, conf: null } : w)),
+                            );
+                          }}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Correct, next word (Enter)"
+                          title="Correct, next word (Enter)"
+                          onClick={accept}
+                          className="hover:bg-muted grid size-10 shrink-0 place-items-center rounded-md border"
+                        >
+                          <Check className="size-4" />
+                        </button>
+                      </div>
+                      <p className="text-muted-foreground text-[11px]">
+                        Enter: correct, next · Tab: skip · Shift+Enter: back · Z: zoom to word
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-muted-foreground grid gap-2 py-2 text-[12px]">
+                    <p className="text-foreground text-[13px] font-medium">
+                      {props.source === "prediction"
+                        ? `Drafted by ${props.engine ?? "the OCR model"}`
+                        : props.source === "annotation"
+                          ? "Your saved labels"
+                          : "No OCR draft yet"}
+                    </p>
+                    <p>
+                      Click a box or a word below. <kbd className="font-mono">J</kbd>/
+                      <kbd className="font-mono">K</kbd> step through words,{" "}
+                      <kbd className="font-mono">B</kbd> draws a box, <kbd className="font-mono">]</kbd> saves
+                      and opens the next page.
+                    </p>
                   </div>
-                  <p className="text-muted-foreground text-[11px]">
-                    Enter: correct, next · Tab: skip · Shift+Enter: back · Z: zoom to word
-                  </p>
-                </div>
-              </>
-            ) : (
-              <div className="text-muted-foreground grid gap-2 py-2 text-[12px]">
-                <p className="text-foreground text-[13px] font-medium">
-                  {props.source === "prediction"
-                    ? `Drafted by ${props.engine ?? "the OCR model"}`
-                    : props.source === "annotation"
-                      ? "Your saved labels"
-                      : "No OCR draft yet"}
-                </p>
-                <p>
-                  Click a box or a word below. <kbd className="font-mono">J</kbd>/
-                  <kbd className="font-mono">K</kbd> step through words, <kbd className="font-mono">B</kbd>{" "}
-                  draws a box, <kbd className="font-mono">]</kbd> saves and opens the next page.
-                </p>
+                )}
               </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2 px-4 pt-3 pb-1 text-[12px]">
-            <span className="font-medium">Words</span>
-            <span className="text-muted-foreground tabular-nums">{words.length}</span>
-            <button
-              type="button"
-              onClick={() => {
-                setOnlyLow(!onlyLow);
-              }}
-              disabled={lowCount === 0 && !onlyLow}
-              className={cn(
-                "ml-auto rounded-full border px-2 py-0.5 tabular-nums disabled:opacity-40",
-                onlyLow ? "border-[#D9480F] bg-[#D9480F]/10 text-[#D9480F]" : "text-muted-foreground",
-              )}
-            >
-              {lowCount} to check
-            </button>
-          </div>
-          <ol ref={listRef} className="scrollbar-none min-h-0 flex-1 overflow-y-auto pb-2">
-            {listed.map((w) => (
-              <li key={w.id} data-id={w.id}>
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1 text-[12px]">
+                <span className="font-medium">Words</span>
+                <span className="text-muted-foreground tabular-nums">{words.length}</span>
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedId(w.id);
+                    setOnlyLow(!onlyLow);
                   }}
+                  disabled={lowCount === 0 && !onlyLow}
                   className={cn(
-                    "hover:bg-muted flex w-full items-center gap-2 px-4 py-1 text-left",
-                    w.id === selectedId && "bg-accent text-accent-foreground hover:bg-accent",
+                    "ml-auto rounded-full border px-2 py-0.5 tabular-nums disabled:opacity-40",
+                    onlyLow ? "border-[#D9480F] bg-[#D9480F]/10 text-[#D9480F]" : "text-muted-foreground",
                   )}
                 >
-                  <span
-                    className={cn(
-                      "size-1.5 shrink-0 rounded-full",
-                      isLow(w) ? "bg-[#D9480F]" : "bg-transparent",
-                    )}
-                    aria-label={isLow(w) ? "Needs checking" : undefined}
-                  />
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate font-mono text-[13px]",
-                      !w.text && "italic opacity-50",
-                    )}
-                  >
-                    {w.text || "empty"}
-                  </span>
+                  {lowCount} to check
                 </button>
-              </li>
-            ))}
-            {listed.length === 0 && (
-              <li className="text-muted-foreground px-4 py-6 text-center text-[12px]">
-                {onlyLow ? "Nothing left to check on this page." : "No words yet. Press B and draw a box."}
-              </li>
-            )}
-          </ol>
+              </div>
+              <ol ref={listRef} className="scrollbar-none min-h-0 flex-1 overflow-y-auto pb-2">
+                {listed.map((w) => (
+                  <li key={w.id} data-id={w.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(w.id);
+                      }}
+                      className={cn(
+                        "hover:bg-muted flex w-full items-center gap-2 px-4 py-1 text-left",
+                        w.id === selectedId && "bg-accent text-accent-foreground hover:bg-accent",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          isLow(w) ? "bg-[#D9480F]" : "bg-transparent",
+                        )}
+                        aria-label={isLow(w) ? "Needs checking" : undefined}
+                      />
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate font-mono text-[13px]",
+                          !w.text && "italic opacity-50",
+                        )}
+                      >
+                        {w.text || "empty"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+                {listed.length === 0 && (
+                  <li className="text-muted-foreground px-4 py-6 text-center text-[12px]">
+                    {onlyLow
+                      ? "Nothing left to check on this page."
+                      : "No words yet. Press B and draw a box."}
+                  </li>
+                )}
+              </ol>
+            </>
+          )}
         </aside>
       </div>
 

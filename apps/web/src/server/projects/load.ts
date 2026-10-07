@@ -22,7 +22,8 @@ export const loadProject = cache(async (slug: string) => {
     project,
     tree,
     counts: {
-      labelled: (counts.submitted ?? 0) + (counts.approved ?? 0),
+      labelled: counts.approved ?? 0,
+      inReview: counts.submitted ?? 0,
       ocrRunning: (counts.new ?? 0) + (counts.prelabelling ?? 0),
     },
     taskTitle: registry.has(project.taskType) ? registry.get(project.taskType).title : project.taskType,

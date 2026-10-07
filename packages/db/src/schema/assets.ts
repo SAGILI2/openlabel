@@ -1,7 +1,17 @@
-import { bigint, index, jsonb, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  index,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { id, timestamps } from "./columns.js";
 import { folders } from "./folders.js";
-import { organizations } from "./identity.js";
+import { organizations, users } from "./identity.js";
 import { projects } from "./projects.js";
 
 export const assetKind = pgEnum("asset_kind", ["image", "pdf", "audio", "video", "text"]);
@@ -37,6 +47,9 @@ export const assets = pgTable(
     /** Width/height/duration/page count etc., by asset kind. */
     mediaMeta: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     status: assetStatus().notNull().default("new"),
+    /** Who sent the page for review and when; null until first submitted. */
+    submittedByUserId: uuid().references(() => users.id, { onDelete: "set null" }),
+    submittedAt: timestamp({ withTimezone: true }),
     ...timestamps,
   },
   (t) => [

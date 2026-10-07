@@ -15,7 +15,7 @@ export interface FolderNode extends FolderRow {
   fileCount: number;
   /** Files in this folder and all sub-folders. */
   totalCount: number;
-  /** Labelled (submitted/approved) files in this folder and all sub-folders. */
+  /** Approved files in this folder and all sub-folders. */
   labelledCount: number;
   children: FolderNode[];
 }
@@ -216,9 +216,7 @@ export async function folderTree(
       .select({
         folderId: assets.folderId,
         n: count(),
-        labelled: sql<number>`count(*) filter (where ${assets.status} in ('submitted', 'approved'))`.mapWith(
-          Number,
-        ),
+        labelled: sql<number>`count(*) filter (where ${assets.status} = 'approved')`.mapWith(Number),
       })
       .from(assets)
       .where(and(eq(assets.projectId, projectId), eq(assets.orgId, scope.orgId)))

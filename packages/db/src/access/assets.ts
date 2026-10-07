@@ -208,7 +208,14 @@ export async function saveAnnotation(
     await tx
       .insert(annotations)
       .values({ orgId: scope.orgId, assetId, version, data, authorUserId: scope.userId });
-    await tx.update(assets).set({ status: "submitted" }).where(eq(assets.id, assetId));
+    // Saving is work in progress; sending for review is a separate step (submitForReview).
+    // An already-submitted or approved page goes back to in-progress, so stale approvals never count.
+    await tx
+      .update(assets)
+      .set({
+        status: sql`case when ${assets.status} = 'rejected' then 'rejected'::asset_status else 'in_progress'::asset_status end`,
+      })
+      .where(eq(assets.id, assetId));
     return { version };
   });
 }

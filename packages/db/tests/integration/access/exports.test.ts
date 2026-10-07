@@ -11,6 +11,7 @@ import {
   registerAsset,
   resolveOrgScope,
   saveAnnotation,
+  submitForReview,
 } from "../../../src/access/index.js";
 import { users } from "../../../src/schema/index.js";
 import { startPostgres } from "../../support/postgres.js";
@@ -67,6 +68,7 @@ describe("exports", () => {
     await expect(
       createExport(scope, {
         projectId: project.id,
+        include: "reviewed",
         name: "x",
         format: "jsonl",
         options: {},
@@ -80,9 +82,11 @@ describe("exports", () => {
     const { asset } = await registerAsset(scope, { projectId: project.id, ...file("a") });
     await registerAsset(scope, { projectId: project.id, ...file("unlabelled") });
     await saveAnnotation(scope, asset.id, { tags: [], regions: [], marker: "v1" }, 0);
+    await submitForReview(scope, asset.id, []);
 
     const exp = await createExport(scope, {
       projectId: project.id,
+      include: "reviewed",
       name: "first",
       format: "jsonl",
       options: {},
@@ -103,8 +107,10 @@ describe("exports", () => {
     const { scope, project } = await setup();
     const { asset } = await registerAsset(scope, { projectId: project.id, ...file("a") });
     await saveAnnotation(scope, asset.id, { tags: [], regions: [] }, 0);
+    await submitForReview(scope, asset.id, []);
     const exp = await createExport(scope, {
       projectId: project.id,
+      include: "reviewed",
       name: "x",
       format: "jsonl",
       options: {},
@@ -118,11 +124,36 @@ describe("exports", () => {
     await expect(
       createExport(bobScope, {
         projectId: project.id,
+        include: "reviewed",
         name: "y",
         format: "jsonl",
         options: {},
         assign: allTrain,
       }),
     ).rejects.toThrow(AccessError);
+  });
+
+  it("exports approved pages only by default", async () => {
+    const { scope, project } = await setup();
+    const { asset } = await registerAsset(scope, { projectId: project.id, ...file("a") });
+    await saveAnnotation(scope, asset.id, { tags: [], regions: [] }, 0);
+    await expect(
+      createExport(scope, {
+        projectId: project.id,
+        name: "x",
+        format: "jsonl",
+        options: {},
+        assign: allTrain,
+      }),
+    ).rejects.toThrow(/No approved pages/);
+    await conn.sql`update assets set status = 'approved' where id = ${asset.id}`;
+    const exp = await createExport(scope, {
+      projectId: project.id,
+      name: "x",
+      format: "jsonl",
+      options: {},
+      assign: allTrain,
+    });
+    expect(exp.itemCount).toBe(1);
   });
 });

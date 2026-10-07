@@ -3,7 +3,6 @@ import Link from "next/link";
 import { listProjects } from "@openlabel/db";
 import { PageBody, TopBar } from "@/components/shell";
 import { NewProjectDialog } from "@/features/projects";
-import { TaskTypeCatalog } from "@/features/tasks";
 import { requireOrgScope } from "@/server/orgs";
 import { getTaskTypeRegistry } from "@/server/tasks";
 
@@ -21,7 +20,7 @@ export default async function ProjectsPage() {
   return (
     <>
       <TopBar title="Projects" />
-      <PageBody className="max-w-none gap-10">
+      <PageBody className="max-w-none gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="text-[20px] font-semibold tracking-tight">
@@ -31,7 +30,9 @@ export default async function ProjectsPage() {
           </div>
           {canCreate && (
             <NewProjectDialog
-              taskTypes={taskTypes.map((t) => ({ id: t.id, title: t.title, ready: READY.has(t.id) }))}
+              taskTypes={taskTypes
+                .filter((t) => READY.has(t.id))
+                .map((t) => ({ id: t.id, title: t.title, ready: true }))}
             />
           )}
         </div>
@@ -80,17 +81,6 @@ export default async function ProjectsPage() {
             })}
           </ul>
         )}
-
-        <section aria-labelledby="task-types-heading">
-          <h2 id="task-types-heading" className="text-[18px] font-semibold tracking-tight">
-            What you can label
-          </h2>
-          <p className="text-muted-foreground mt-1 mb-6">
-            {taskTypes.length} task types are installed. Text recognition (OCR) has its editor today; the
-            others arrive next.
-          </p>
-          <TaskTypeCatalog taskTypes={taskTypes} />
-        </section>
       </PageBody>
     </>
   );
