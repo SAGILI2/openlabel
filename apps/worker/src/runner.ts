@@ -1,11 +1,4 @@
-import {
-  claimJobs,
-  completeJob,
-  failJob,
-  markPrelabelFailed,
-  type Database,
-  type JobRow,
-} from "@openlabel/db";
+import { claimJobs, completeJob, failJob, type Database, type JobRow } from "@openlabel/db";
 
 export type Handler = (job: JobRow) => Promise<void>;
 
@@ -14,6 +7,8 @@ export interface RunnerOptions {
   workerId: string;
   kind: string;
   handler: Handler;
+  /** Called once when a job has used all its attempts, to mark the affected record as failed. */
+  onGiveUp?: (job: JobRow, error: string) => Promise<void>;
   concurrency: number;
   idleDelayMs?: number;
   log: (msg: string, fields?: Record<string, unknown>) => void;
@@ -37,9 +32,7 @@ export function startRunner(opts: RunnerOptions): { stop: () => Promise<void> } 
       const message = err instanceof Error ? err.message : String(err);
       const outcome = await failJob(opts.db, job, message);
       opts.log(`job ${outcome}`, { jobId: job.id, kind: job.kind, attempt: job.attempts, error: message });
-      if (outcome === "failed" && job.kind === "prelabel" && typeof job.payload.assetId === "string") {
-        await markPrelabelFailed(opts.db, job.payload.assetId);
-      }
+      if (outcome === "failed") await opts.onGiveUp?.(job, message);
     }
   }
 

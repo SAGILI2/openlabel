@@ -9,7 +9,7 @@ const config: NextConfig = {
   poweredByHeader: false,
   transpilePackages: ["@openlabel/contracts"],
   experimental: { serverActions: { bodySizeLimit: "2mb" } },
-  serverExternalPackages: ["postgres", "@aws-sdk/client-s3"],
+  serverExternalPackages: ["postgres", "@aws-sdk/client-s3", "sharp"],
 };
 
 export default config;
