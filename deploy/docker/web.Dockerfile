@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Multi-stage build for the OpenLabel web app and the migration job.
+# Multi-stage build for the OpenLabel web app, worker and migration job.
 
 ARG NODE_VERSION=24-alpine
 
@@ -13,18 +13,26 @@ WORKDIR /repo
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/web/package.json apps/web/
+COPY apps/worker/package.json apps/worker/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/db/package.json packages/db/
+COPY packages/storage/package.json packages/storage/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 # ---- build: compile packages and the Next.js standalone server
 FROM deps AS build
+# Unique per build unless supplied (CI can pass the git SHA); see next.config.ts deploymentId.
+ARG OPENLABEL_BUILD_ID
 COPY tsconfig.base.json turbo.json ./
 COPY packages packages
 COPY apps/web apps/web
+COPY apps/worker apps/worker
 RUN pnpm --filter @openlabel/contracts build \
  && pnpm --filter @openlabel/db build \
- && pnpm --filter @openlabel/web build
+ && pnpm --filter @openlabel/storage build \
+ && pnpm --filter @openlabel/worker build \
+ && OPENLABEL_BUILD_ID="${OPENLABEL_BUILD_ID:-$(date +%s)}" pnpm --filter @openlabel/web build \
+ && pnpm --filter @openlabel/worker deploy --prod --legacy /worker
 
 # ---- migrate: runs pending migrations and exits
 FROM node:${NODE_VERSION} AS migrate
@@ -36,6 +44,14 @@ COPY --from=build /repo/packages/db/drizzle ./packages/db/drizzle
 COPY --from=build /repo/packages/db/package.json ./packages/db/package.json
 USER node
 CMD ["node", "packages/db/dist/migrate/cli.js"]
+
+# ---- worker: background jobs (pre-labelling); scale with --scale worker=N
+FROM node:${NODE_VERSION} AS worker
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=node:node /worker ./
+USER node
+CMD ["node", "dist/main.js"]
 
 # ---- runtime: minimal standalone server, non-root
 FROM node:${NODE_VERSION} AS runtime

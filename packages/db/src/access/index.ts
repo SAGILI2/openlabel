@@ -26,3 +26,30 @@ export {
 } from "./invitations.js";
 export { setActiveOrganization } from "./session-org.js";
 export { listRecentAudit, type AuditRow } from "./audit.js";
+export {
+  createProject,
+  getProjectById,
+  getProjectBySlug,
+  listProjects,
+  type ProjectRow,
+  type ProjectWithCounts,
+} from "./projects.js";
+export {
+  assetStatusCounts,
+  getAsset,
+  getLabellingState,
+  listAssets,
+  registerAsset,
+  saveAnnotation,
+  type AssetRow,
+  type AssetStatus,
+  type LabellingState,
+} from "./assets.js";
+export { claimJobs, completeJob, enqueueJob, failJob, type JobRow } from "./jobs.js";
+export {
+  loadPrelabelTarget,
+  markPrelabelFailed,
+  markPrelabelling,
+  storePrediction,
+  type PrelabelTarget,
+} from "./prelabel.js";

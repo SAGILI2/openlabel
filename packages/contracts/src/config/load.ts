@@ -25,6 +25,10 @@ export const configSchema = z.object({
   AUTH_PASSWORD_MIN_LENGTH: z.coerce.number().int().min(6).max(128).default(6),
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  /** Base URL of the OCR model service implementing POST /predict. */
+  OCR_SERVICE_URL: z.url().default("http://ocr:8000"),
+  /** Concurrent pre-label jobs per worker process. */
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(2),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 
