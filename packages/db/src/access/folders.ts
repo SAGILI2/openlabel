@@ -314,3 +314,120 @@ export async function subtreeFolderIds(
     );
   return rows.map((r) => r.id);
 }
+
+export interface FolderSummary {
+  id: string;
+  name: string;
+  path: string;
+  /** Files in this folder and every folder under it. */
+  totalCount: number;
+  /** Has sub-folders (so the tree can show an expand arrow without loading them). */
+  hasChildren: boolean;
+}
+
+/**
+ * One level of the folder tree: the direct children of `parentId` (null = top level) with
+ * subtree file counts. The browser loads a level when it's opened, so a project with tens of
+ * thousands of folders never sends them all.
+ */
+export async function folderChildren(
+  scope: OrgScope,
+  projectId: string,
+  parentId: string | null,
+): Promise<FolderSummary[]> {
+  await projectInScope(scope, projectId);
+  const rows = await scope.db.execute<{
+    id: string;
+    name: string;
+    path: string;
+    total: number;
+    has_children: boolean;
+  }>(sql`
+    select f.id, f.name, f.path,
+      (select count(*)::int from ${assets} a
+        join ${folders} d on d.id = a.folder_id
+        where a.project_id = ${projectId}
+          and (d.id = f.id or starts_with(d.path, f.path || '/'))
+      ) as total,
+      exists (select 1 from ${folders} c where c.parent_id = f.id) as has_children
+    from ${folders} f
+    where f.project_id = ${projectId} and f.org_id = ${scope.orgId}
+      and ${parentId === null ? sql`f.parent_id is null` : sql`f.parent_id = ${parentId}`}
+    order by f.name`);
+  return rows
+    .map((r) => ({ id: r.id, name: r.name, path: r.path, totalCount: r.total, hasChildren: r.has_children }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+/** The folders on the way to `folderId` (top-down, including it), to open the tree there. */
+export async function folderAncestors(
+  scope: OrgScope,
+  projectId: string,
+  folderId: string,
+): Promise<FolderRow[]> {
+  const folder = await folderInScope(scope, projectId, folderId);
+  const parts = folder.path.split("/");
+  const paths = parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+  const rows = await scope.db
+    .select(columns)
+    .from(folders)
+    .where(
+      and(eq(folders.projectId, projectId), eq(folders.orgId, scope.orgId), inArray(folders.path, paths)),
+    );
+  return paths.map((p) => rows.find((r) => r.path === p)).filter((r): r is FolderRow => r !== undefined);
+}
+
+/** File counts for the whole project and its unfiled files, without loading folders. */
+export async function projectFileCounts(
+  scope: OrgScope,
+  projectId: string,
+): Promise<{ totalCount: number; rootFileCount: number }> {
+  await projectInScope(scope, projectId);
+  const [row] = await scope.db
+    .select({
+      total: sql<number>`count(*)::int`,
+      root: sql<number>`(count(*) filter (where ${assets.folderId} is null))::int`,
+    })
+    .from(assets)
+    .where(and(eq(assets.projectId, projectId), eq(assets.orgId, scope.orgId)));
+  return { totalCount: row?.total ?? 0, rootFileCount: row?.root ?? 0 };
+}
+
+/** Folders whose path contains `term` (case-insensitive), for pickers; capped at `limit`. */
+export async function searchFolders(
+  scope: OrgScope,
+  projectId: string,
+  term: string,
+  limit = 50,
+): Promise<FolderRow[]> {
+  await projectInScope(scope, projectId);
+  const t = term
+    .trim()
+    .slice(0, 200)
+    .replace(/[\\%_]/g, (c) => `\\${c}`);
+  return scope.db
+    .select(columns)
+    .from(folders)
+    .where(
+      and(
+        eq(folders.projectId, projectId),
+        eq(folders.orgId, scope.orgId),
+        t ? sql`${folders.path} ilike ${`%${t}%`}` : undefined,
+      ),
+    )
+    .orderBy(asc(folders.path))
+    .limit(Math.min(Math.max(limit, 1), 200));
+}
+
+/** Path of one folder (for headings), or null if it isn't in the project. */
+export async function folderPath(
+  scope: OrgScope,
+  projectId: string,
+  folderId: string,
+): Promise<string | null> {
+  const [row] = await scope.db
+    .select({ path: folders.path })
+    .from(folders)
+    .where(and(eq(folders.id, folderId), eq(folders.projectId, projectId), eq(folders.orgId, scope.orgId)));
+  return row?.path ?? null;
+}

@@ -161,7 +161,7 @@ const SORTS: Record<AssetSort, SQL[]> = {
 };
 
 export interface AssetPage {
-  rows: AssetRow[];
+  rows: (AssetRow & { folderPath: string | null })[];
   /** Files matching the filter (all pages). */
   total: number;
   /** Counts per filter for the tabs, within the same folder scope. */
@@ -222,8 +222,9 @@ export async function pageAssets(
   const counts = countRow ?? { all: 0, mine: 0, todo: 0, review: 0, done: 0, ocr: 0 };
   const size = Math.min(Math.max(opts.pageSize, 1), 500);
   const rows = await scope.db
-    .select(columns)
+    .select({ ...columns, folderPath: folders.path })
     .from(assets)
+    .leftJoin(folders, eq(folders.id, assets.folderId))
     .where(and(base, filterSql))
     .orderBy(...SORTS[opts.sort ?? "oldest"])
     .limit(size)

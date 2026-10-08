@@ -9,6 +9,10 @@ import {
   createProject,
   assetNeighbours,
   deleteFolder,
+  folderAncestors,
+  folderChildren,
+  projectFileCounts,
+  searchFolders,
   pageAssets,
   ensureFolderPath,
   folderTree,
@@ -148,6 +152,38 @@ describe("folders", () => {
     expect(result.orphanKeys).toEqual([`k/9`]);
     expect((await folderTree(scope, project.id)).roots).toEqual([]);
     expect((await listAssets(scope, project.id)).map((a) => a.sha256)).toEqual(["10"]);
+  });
+
+  it("loads the tree one level at a time with subtree counts", async () => {
+    const { scope, project } = await setup();
+    const leaf = await ensureFolderPath(scope, project.id, "HDFC/ATM1");
+    await ensureFolderPath(scope, project.id, "HDFC/ATM2");
+    await ensureFolderPath(scope, project.id, "ICICI");
+    await registerAsset(scope, { projectId: project.id, ...file("x1", leaf?.id ?? null) });
+    await registerAsset(scope, { projectId: project.id, ...file("x2", leaf?.id ?? null) });
+    await registerAsset(scope, { projectId: project.id, ...file("x3", null) });
+
+    const top = await folderChildren(scope, project.id, null);
+    expect(top.map((f) => [f.name, f.totalCount, f.hasChildren])).toEqual([
+      ["HDFC", 2, true],
+      ["ICICI", 0, false],
+    ]);
+    const hdfc = top[0];
+    if (!hdfc) throw new Error("no HDFC");
+    const kids = await folderChildren(scope, project.id, hdfc.id);
+    expect(kids.map((f) => [f.path, f.totalCount, f.hasChildren])).toEqual([
+      ["HDFC/ATM1", 2, false],
+      ["HDFC/ATM2", 0, false],
+    ]);
+    expect((await folderAncestors(scope, project.id, leaf?.id ?? "")).map((f) => f.path)).toEqual([
+      "HDFC",
+      "HDFC/ATM1",
+    ]);
+    expect(await projectFileCounts(scope, project.id)).toEqual({ totalCount: 3, rootFileCount: 1 });
+    expect((await searchFolders(scope, project.id, "atm")).map((f) => f.path)).toEqual([
+      "HDFC/ATM1",
+      "HDFC/ATM2",
+    ]);
   });
 
   it("pages and filters files in the database", async () => {

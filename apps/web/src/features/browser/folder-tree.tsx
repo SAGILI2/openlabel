@@ -5,13 +5,14 @@ import {
   FolderOpen,
   Inbox,
   Layers,
+  Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,31 +20,40 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { folderChildrenAction } from "@/server/projects/actions";
+import { useNavigationPending } from "./navigation-pending";
 
+/** One folder as the tree shows it; children load when it's opened. */
 export interface TreeNode {
   id: string;
   name: string;
   path: string;
+  /** Files in this folder and below. */
   totalCount: number;
-  labelledCount: number;
-  children: TreeNode[];
+  hasChildren: boolean;
 }
 
 /** Which folder is shown: "all" = whole project, "root" = files outside any folder, otherwise a folder id. */
 export type FolderSelection = string;
 
 interface Props {
+  projectId: string;
+  /** Top-level folders (loaded with the page). */
   nodes: TreeNode[];
+  /** Folders on the way to the selected one, so the tree opens there. */
+  openPath: string[];
   selected: FolderSelection;
   totalCount: number;
   rootFileCount: number;
   hrefFor: (selection: FolderSelection) => string;
   canEdit: boolean;
-  onNewFolder: (parentId: string | null) => void;
+  onNewFolder: (parent: TreeNode | null) => void;
   onRename: (node: TreeNode) => void;
   onDelete: (node: TreeNode) => void;
   /** Files dropped onto a folder ("root" = project root). */
   onDropFiles: (target: string | null, assetIds: string[]) => void;
+  /** Changes when the server data refreshes, so opened folders reload their children. */
+  version: string;
 }
 
 const DRAG_TYPE = "application/x-openlabel-assets";
@@ -70,28 +80,27 @@ function Row({
   label,
   count,
   active,
-  depth,
   onDrop,
   children,
 }: {
   href: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   count: number;
   active: boolean;
-  depth: number;
   onDrop?: ((ids: string[]) => void) | undefined;
-  children?: React.ReactNode;
+  children?: ReactNode;
 }) {
   const [over, setOver] = useState(false);
+  const nav = useNavigationPending();
+  const opening = nav.pending === href;
   return (
     <div
       className={cn(
-        "group flex items-center rounded-md pr-1 text-[13px]",
+        "group flex min-w-0 items-center rounded-md pr-1 text-[13px]",
         active ? "bg-accent text-accent-foreground" : "hover:bg-muted",
         over && "ring-brand ring-2",
       )}
-      style={{ paddingLeft: depth * 14 }}
       onDragOver={(e) => {
         if (!onDrop || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
         e.preventDefault();
@@ -109,10 +118,26 @@ function Row({
         }
       }}
     >
-      <Link href={href} className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2" scroll={false}>
-        {icon}
+      <Link
+        href={href}
+        className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-2"
+        scroll={false}
+        onClick={(e) => {
+          if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !active) nav.start(href);
+        }}
+      >
+        {opening ? (
+          <Loader2
+            className="text-brand size-4 shrink-0 animate-spin motion-reduce:animate-none"
+            aria-label="Opening"
+          />
+        ) : (
+          icon
+        )}
         <span className="truncate">{label}</span>
-        <span className="text-muted-foreground ml-auto pl-2 text-[11px] tabular-nums">{count}</span>
+        <span className="text-muted-foreground ml-auto pl-2 text-[11px] tabular-nums">
+          {count.toLocaleString()}
+        </span>
       </Link>
       {children}
     </div>
@@ -121,11 +146,8 @@ function Row({
 
 const BATCH = 100;
 
-/**
- * Renders a long list of folders in batches: the next 100 appear as the end scrolls into view
- * (like a feed), so a project with thousands of folders never renders them all at once.
- */
-function Batched<T>({ items, render }: { items: T[]; render: (item: T) => React.ReactNode }) {
+/** Shows a long list 100 at a time; more appear as the end scrolls into view. */
+function Batched<T>({ items, render }: { items: T[]; render: (item: T) => ReactNode }) {
   const [count, setCount] = useState(BATCH);
   const end = useRef<HTMLLIElement>(null);
   const more = count < items.length;
@@ -157,23 +179,54 @@ function Batched<T>({ items, render }: { items: T[]; render: (item: T) => React.
 
 function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Props }) {
   const isActive = props.selected === node.id;
-  const containsActive = (n: TreeNode): boolean =>
-    n.children.some((c) => c.id === props.selected || containsActive(c));
-  const [open, setOpen] = useState(isActive || containsActive(node));
-  const Icon = open && node.children.length > 0 ? FolderOpen : Folder;
+  const [open, setOpen] = useState(props.openPath.includes(node.id));
+  const [children, setChildren] = useState<TreeNode[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadedFor = useRef<string | null>(null);
+
+  // Load this level when the folder is opened (and again after the server data changes).
+  useEffect(() => {
+    if (!open || !node.hasChildren || loadedFor.current === props.version) return;
+    loadedFor.current = props.version;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void folderChildrenAction(props.projectId, node.id).then((r) => {
+      if (cancelled) return;
+      setLoading(false);
+      if (r.ok) setChildren(r.data);
+      else setError(r.error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, node.hasChildren, node.id, props.projectId, props.version]);
+
+  const Icon = open && node.hasChildren ? FolderOpen : Folder;
   return (
     <li>
-      <div className="flex items-center">
+      <div className="flex min-w-0 items-center" style={{ paddingLeft: depth * 14 }}>
         <button
           type="button"
           aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          className={cn("text-muted-foreground size-5 shrink-0", node.children.length === 0 && "invisible")}
-          style={{ marginLeft: depth * 14 }}
+          aria-expanded={node.hasChildren ? open : undefined}
+          className={cn(
+            "text-muted-foreground grid size-5 shrink-0 place-items-center",
+            !node.hasChildren && "invisible",
+          )}
           onClick={() => {
             setOpen(!open);
           }}
         >
-          <ChevronRight className={cn("mx-auto size-3.5 transition-transform", open && "rotate-90")} />
+          {loading ? (
+            <Loader2
+              className="size-3.5 animate-spin motion-reduce:animate-none"
+              aria-label="Loading folders"
+            />
+          ) : (
+            <ChevronRight className={cn("size-3.5 transition-transform", open && "rotate-90")} />
+          )}
         </button>
         <div className="min-w-0 flex-1">
           <Row
@@ -182,7 +235,6 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
             label={node.name}
             count={node.totalCount}
             active={isActive}
-            depth={0}
             onDrop={
               props.canEdit
                 ? (ids) => {
@@ -202,7 +254,7 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
                 <DropdownMenuContent align="start">
                   <DropdownMenuItem
                     onSelect={() => {
-                      props.onNewFolder(node.id);
+                      props.onNewFolder(node);
                     }}
                   >
                     <Plus /> New sub-folder
@@ -228,19 +280,38 @@ function Node({ node, depth, props }: { node: TreeNode; depth: number; props: Pr
           </Row>
         </div>
       </div>
-      {open && node.children.length > 0 && (
+      {open && node.hasChildren && (
         <ul>
-          <Batched
-            items={node.children}
-            render={(c) => <Node key={c.id} node={c} depth={depth + 1} props={props} />}
-          />
+          {children === null && !error && (
+            <li
+              className="text-muted-foreground flex items-center gap-2 py-1.5 text-[12px]"
+              style={{ paddingLeft: (depth + 1) * 14 + 24 }}
+            >
+              <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+              Loading folders…
+            </li>
+          )}
+          {error && (
+            <li
+              className="text-destructive py-1.5 text-[12px]"
+              style={{ paddingLeft: (depth + 1) * 14 + 24 }}
+            >
+              {error}
+            </li>
+          )}
+          {children && (
+            <Batched
+              items={children}
+              render={(c) => <Node key={c.id} node={c} depth={depth + 1} props={props} />}
+            />
+          )}
         </ul>
       )}
     </li>
   );
 }
 
-/** Project folder tree: all files, unfiled files, then nested folders. Files can be dropped on folders. */
+/** Project folder tree: all files, unfiled files, then folders that load one level at a time. */
 export function FolderTree(props: Props) {
   return (
     // minmax(0,1fr): a long folder name truncates instead of widening the column and pushing
@@ -252,7 +323,6 @@ export function FolderTree(props: Props) {
         label="All files"
         count={props.totalCount}
         active={props.selected === "all"}
-        depth={0}
       />
       <Row
         href={props.hrefFor("root")}
@@ -260,7 +330,6 @@ export function FolderTree(props: Props) {
         label="Not in a folder"
         count={props.rootFileCount}
         active={props.selected === "root"}
-        depth={0}
         onDrop={
           props.canEdit
             ? (ids) => {
@@ -289,7 +358,7 @@ export function FolderTree(props: Props) {
           No folders yet. Upload a folder or create one.
         </p>
       ) : (
-        <ul className="-ml-1">
+        <ul className="-ml-1 min-w-0">
           <Batched items={props.nodes} render={(n) => <Node key={n.id} node={n} depth={0} props={props} />} />
         </ul>
       )}
