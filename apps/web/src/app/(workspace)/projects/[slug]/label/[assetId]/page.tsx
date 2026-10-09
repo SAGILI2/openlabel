@@ -4,13 +4,14 @@ import {
   getLabellingState,
   getReviewState,
   assetNeighbours,
+  folderPath,
   listEligibleReviewers,
   REVIEWER_ROLES,
   subtreeFolderIds,
 } from "@openlabel/db";
 import { AutoRefresh } from "@/features/projects";
 import { Editor, wordsFromAnnotation, wordsFromPrediction } from "@/features/labelling";
-import { folderPaths, loadProject } from "@/server/projects/load";
+import { loadProject } from "@/server/projects/load";
 
 export const metadata = { title: "Label" };
 
@@ -22,10 +23,15 @@ export default async function LabelPage({
   searchParams: Promise<{ folder?: string }>;
 }) {
   const [{ slug, assetId }, query] = await Promise.all([params, searchParams]);
-  const { scope, project, tree } = await loadProject(slug);
-  const paths = folderPaths(tree.roots);
+  const { scope, project } = await loadProject(slug);
   const folder =
-    query.folder === "root" ? "root" : query.folder && paths.has(query.folder) ? query.folder : null;
+    query.folder === "root"
+      ? "root"
+      : query.folder &&
+          /^[0-9a-f-]{36}$/i.test(query.folder) &&
+          (await folderPath(scope, project.id, query.folder))
+        ? query.folder
+        : null;
 
   const state = await getLabellingState(scope, assetId).catch((err: unknown) => {
     if (err instanceof AccessError) notFound();

@@ -1,7 +1,13 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { AccessError, assetStatusCounts, folderTree, getProjectBySlug, type FolderNode } from "@openlabel/db";
+import {
+  AccessError,
+  assetStatusCounts,
+  folderChildren,
+  getProjectBySlug,
+  projectFileCounts,
+} from "@openlabel/db";
 import { requireOrgScope } from "../orgs";
 import { getTaskTypeRegistry } from "../tasks";
 
@@ -12,10 +18,13 @@ export const loadProject = cache(async (slug: string) => {
     if (err instanceof AccessError) notFound();
     throw err;
   });
-  const [tree, counts] = await Promise.all([
-    folderTree(scope, project.id),
+  // Only the top level of folders: deeper levels load when opened (projects can have 10,000s).
+  const [roots, files, counts] = await Promise.all([
+    folderChildren(scope, project.id, null),
+    projectFileCounts(scope, project.id),
     assetStatusCounts(scope, project.id),
   ]);
+  const tree = { roots, ...files };
   const registry = getTaskTypeRegistry();
   return {
     scope,
@@ -30,12 +39,3 @@ export const loadProject = cache(async (slug: string) => {
     canEdit: ["owner", "admin", "manager"].includes(scope.role),
   };
 });
-
-/** Flat id → path map of the folder tree. */
-export function folderPaths(nodes: FolderNode[], out = new Map<string, string>()): Map<string, string> {
-  for (const n of nodes) {
-    out.set(n.id, n.path);
-    folderPaths(n.children, out);
-  }
-  return out;
-}

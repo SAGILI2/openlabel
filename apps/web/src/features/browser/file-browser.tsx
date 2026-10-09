@@ -11,6 +11,7 @@ import {
   CircleDashed,
   Eye,
   FolderInput,
+  FolderOpen,
   FolderPlus,
   LayoutGrid,
   List,
@@ -24,7 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition, type DragEvent } from "react";
+import { Suspense, useEffect, useRef, useState, useTransition, type DragEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/dialogs";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,8 +35,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BulkReviewDialog, SendForReviewDialog, type ReviewerOption } from "@/features/review";
@@ -47,7 +46,10 @@ import {
   moveAssetsAction,
   renameFolderAction,
 } from "@/server/projects/actions";
+import { FolderPicker } from "./folder-picker";
+import { NavigationPendingProvider, useNavigationPending } from "./navigation-pending";
 import { dragAssets, FolderTree, type FolderSelection, type TreeNode } from "./folder-tree";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { itemsFromDrop, itemsFromInput, uploadAll, type UploadItem, type UploadProgress } from "./upload";
 
 export interface BrowserFile {
@@ -124,7 +126,10 @@ interface Props {
   projectSlug: string;
   selection: FolderSelection;
   folderName: string;
+  /** Top-level folders; deeper levels load in the tree when opened. */
   tree: TreeNode[];
+  /** Folders on the way to the selected one, so the tree opens there. */
+  openPath: string[];
   totalCount: number;
   rootFileCount: number;
   files: BrowserFile[];
@@ -151,8 +156,21 @@ interface Props {
 const READY_FOR_REVIEW = new Set<BrowserFile["status"]>(["in_progress", "rejected"]);
 
 /** Project file browser: folder tree, file list/grid, selection, moving and uploading. */
-export function FileBrowser(props: Props) {
-  const router = useRouter();
+function FileBrowserInner(props: Props) {
+  const rawRouter = useRouter();
+  const nav = useNavigationPending();
+  // Every in-browser navigation goes through here, so the loader shows straight away.
+  const router = {
+    ...rawRouter,
+    push: (href: string, opts?: { scroll?: boolean }) => {
+      nav.start(href);
+      rawRouter.push(href, opts);
+    },
+    replace: (href: string, opts?: { scroll?: boolean }) => {
+      nav.start(href);
+      rawRouter.replace(href, opts);
+    },
+  };
   const dialogs = useDialogs();
   const filter = props.filter;
   const [bulkDecision, setBulkDecision] = useState<"approve" | "request_changes" | null>(null);
@@ -161,6 +179,14 @@ export function FileBrowser(props: Props) {
   const [dropping, setDropping] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  // Bumps when the server sends fresh data, so opened folders in the tree reload their children.
+  const [treeVersion, setTreeVersion] = useState(0);
+  const [seenTree, setSeenTree] = useState(props.tree);
+  if (seenTree !== props.tree) {
+    setSeenTree(props.tree);
+    setTreeVersion((v) => v + 1);
+  }
   const [, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
@@ -275,8 +301,8 @@ export function FileBrowser(props: Props) {
         ? "Use 120 characters or fewer."
         : null;
 
-  async function newFolder(parentId: string | null) {
-    const parent = parentId ? allFolders.find((f) => f.id === parentId) : undefined;
+  async function newFolder(parent: TreeNode | null) {
+    const parentId = parent?.id ?? null;
     const name = await dialogs.prompt({
       title: "New folder",
       description: parent ? `Inside ${parent.path}` : "At the top of this project",
@@ -339,18 +365,6 @@ export function FileBrowser(props: Props) {
     setSelected(new Set());
   }
 
-  const allFolders = useMemo(() => {
-    const out: TreeNode[] = [];
-    const walk = (ns: TreeNode[]) => {
-      for (const n of ns) {
-        out.push(n);
-        walk(n.children);
-      }
-    };
-    walk(props.tree);
-    return out;
-  }, [props.tree]);
-
   const toggle = (id: string) => {
     const next = new Set(selected);
     if (next.has(id)) next.delete(id);
@@ -392,7 +406,10 @@ export function FileBrowser(props: Props) {
       {/* Folder tree (desktop) */}
       <aside className="bg-sidebar border-sidebar-border scrollbar-none hidden overflow-y-auto border-r p-3 lg:block">
         <FolderTree
+          projectId={props.projectId}
           nodes={props.tree}
+          openPath={props.openPath}
+          version={String(treeVersion)}
           selected={props.selection}
           totalCount={props.totalCount}
           rootFileCount={props.rootFileCount}
@@ -417,25 +434,29 @@ export function FileBrowser(props: Props) {
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-6">
           {/* Folder picker for small screens */}
-          <Select
-            value={props.selection}
-            onValueChange={(v) => {
-              router.push(hrefFor(v));
-            }}
-          >
-            <SelectTrigger size="sm" className="h-8 max-w-[200px] text-[13px] lg:hidden" aria-label="Folder">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All files ({props.totalCount})</SelectItem>
-              <SelectItem value="root">Not in a folder ({props.rootFileCount})</SelectItem>
-              {allFolders.map((f) => (
-                <SelectItem key={f.id} value={f.id}>
-                  {f.path} ({f.totalCount})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="outline" className="h-8 max-w-[200px] text-[13px] lg:hidden">
+                <FolderOpen className="size-3.5" aria-hidden />
+                <span className="truncate">{props.folderName}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto p-0">
+              <div className="grid gap-0.5 border-b p-1">
+                <Link href={hrefFor("all")} className="hover:bg-muted rounded px-3 py-1.5 text-[13px]">
+                  All files ({props.totalCount.toLocaleString()})
+                </Link>
+              </div>
+              <FolderPicker
+                projectId={props.projectId}
+                includeRoot
+                autoFocus
+                onPick={(f) => {
+                  router.push(hrefFor(f ? f.id : "root"));
+                }}
+              />
+            </PopoverContent>
+          </Popover>
           <h2 className="hidden truncate text-[14px] font-semibold lg:block">{props.folderName}</h2>
           <div className="bg-muted flex rounded-md p-0.5" role="tablist" aria-label="Filter">
             {FILTERS.filter((f) => f.id !== "mine" || props.canReview).map((f) => (
@@ -540,36 +561,25 @@ export function FileBrowser(props: Props) {
               </Button>
             )}
             {selected.size > 0 && props.canEdit && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              <Popover open={moveOpen} onOpenChange={setMoveOpen}>
+                <PopoverTrigger asChild>
                   <Button size="sm" variant="outline">
                     <FolderInput /> Move {selected.size}
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="max-h-80 w-64 overflow-y-auto">
-                  <DropdownMenuLabel className="text-muted-foreground text-[12px] font-normal">
-                    Move to
-                  </DropdownMenuLabel>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      move(null, [...selected]);
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-auto p-0">
+                  <p className="text-muted-foreground px-3 pt-2 text-[12px]">Move to</p>
+                  <FolderPicker
+                    projectId={props.projectId}
+                    includeRoot
+                    autoFocus
+                    onPick={(f) => {
+                      setMoveOpen(false);
+                      move(f ? f.id : null, [...selected]);
                     }}
-                  >
-                    Not in a folder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {allFolders.map((f) => (
-                    <DropdownMenuItem
-                      key={f.id}
-                      onSelect={() => {
-                        move(f.id, [...selected]);
-                      }}
-                    >
-                      <span className="truncate">{f.path}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  />
+                </PopoverContent>
+              </Popover>
             )}
             <div className="bg-muted flex rounded-md p-0.5">
               <Link
@@ -602,7 +612,17 @@ export function FileBrowser(props: Props) {
                   variant="outline"
                   className="hidden sm:inline-flex"
                   onClick={() => {
-                    void newFolder(targetFolderId);
+                    void newFolder(
+                      targetFolderId
+                        ? {
+                            id: targetFolderId,
+                            name: props.folderName,
+                            path: props.folderName,
+                            totalCount: 0,
+                            hasChildren: true,
+                          }
+                        : null,
+                    );
                   }}
                 >
                   <FolderPlus /> Folder
@@ -690,7 +710,22 @@ export function FileBrowser(props: Props) {
         )}
 
         {/* Files */}
-        <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "scrollbar-none relative min-h-0 flex-1 overflow-y-auto transition-opacity",
+            nav.pending && "pointer-events-none opacity-50",
+          )}
+          aria-busy={nav.pending ? true : undefined}
+        >
+          {nav.pending && (
+            <div
+              role="status"
+              className="bg-card text-muted-foreground sticky top-0 z-10 flex items-center gap-2 border-b px-6 py-2 text-[12px]"
+            >
+              <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+              Loading files…
+            </div>
+          )}
           {visible.length === 0 ? (
             <div className="text-muted-foreground grid place-items-center gap-2 px-6 py-20 text-center">
               <CircleDashed className="size-6" strokeWidth={1.5} />
@@ -952,5 +987,16 @@ export function FileBrowser(props: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Project file browser; shows a loader while a folder, page or filter is opening. */
+export function FileBrowser(props: Props) {
+  return (
+    <Suspense>
+      <NavigationPendingProvider>
+        <FileBrowserInner {...props} />
+      </NavigationPendingProvider>
+    </Suspense>
   );
 }

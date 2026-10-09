@@ -1,4 +1,6 @@
 import {
+  folderAncestors,
+  folderPath,
   getReviewRules,
   listEligibleReviewers,
   pageAssets,
@@ -9,7 +11,7 @@ import {
 } from "@openlabel/db";
 import { FileBrowser, type FolderSelection } from "@/features/browser";
 import { AutoRefresh } from "@/features/projects";
-import { folderPaths, loadProject } from "@/server/projects/load";
+import { loadProject } from "@/server/projects/load";
 
 const PAGE_SIZE = 100;
 const FILTERS = new Set<string>(["all", "mine", "todo", "review", "done", "ocr"]);
@@ -32,10 +34,17 @@ export default async function ProjectFilesPage({
 }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
   const { scope, project, tree, counts, canEdit } = await loadProject(slug);
-  const paths = folderPaths(tree.roots);
-
+  // A folder id from the URL counts only if it's in this project (its path proves it).
+  const folderRow =
+    query.folder && query.folder !== "root" && /^[0-9a-f-]{36}$/i.test(query.folder)
+      ? await folderPath(scope, project.id, query.folder)
+      : null;
   const selection: FolderSelection =
-    query.folder === "root" ? "root" : query.folder && paths.has(query.folder) ? query.folder : "all";
+    query.folder === "root" ? "root" : folderRow && query.folder ? query.folder : "all";
+  const openPath =
+    folderRow && query.folder
+      ? (await folderAncestors(scope, project.id, query.folder)).map((f) => f.id)
+      : [];
   const filter: AssetFilter = FILTERS.has(query.filter ?? "") ? (query.filter as AssetFilter) : "all";
   const sort: AssetSort = SORTS.has(query.sort ?? "") ? (query.sort as AssetSort) : "oldest";
   const pageSize = [50, 100, 200, 500].includes(Number(query.size)) ? Number(query.size) : PAGE_SIZE;
@@ -59,11 +68,7 @@ export default async function ProjectFilesPage({
     getReviewRules(scope, project.id),
   ]);
   const folderName =
-    selection === "all"
-      ? "All files"
-      : selection === "root"
-        ? "Not in a folder"
-        : (paths.get(selection) ?? "Folder");
+    selection === "all" ? "All files" : selection === "root" ? "Not in a folder" : (folderRow ?? "Folder");
 
   return (
     <>
@@ -74,6 +79,7 @@ export default async function ProjectFilesPage({
         selection={selection}
         folderName={folderName}
         tree={tree.roots}
+        openPath={openPath}
         totalCount={tree.totalCount}
         rootFileCount={tree.rootFileCount}
         canEdit={canEdit}
@@ -97,7 +103,7 @@ export default async function ProjectFilesPage({
           status: a.status,
           width: typeof a.mediaMeta.width === "number" ? a.mediaMeta.width : null,
           height: typeof a.mediaMeta.height === "number" ? a.mediaMeta.height : null,
-          folderPath: a.folderId ? (paths.get(a.folderId) ?? null) : null,
+          folderPath: a.folderPath,
         }))}
       />
     </>

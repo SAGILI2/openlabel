@@ -24,8 +24,8 @@ import {
   submitManyForReview,
   reviewManyAssets,
   subtreeFolderIds,
-  pageAssets,
-  folderTree,
+  folderChildren,
+  searchFolders,
 } from "@openlabel/db";
 import { EXPORTERS } from "@openlabel/exporters";
 import { refresh } from "next/cache";
@@ -353,65 +353,31 @@ export async function setReviewRulesAction(
   }
 }
 
-export interface BrowserRow {
-  id: string;
-  name: string;
-  status: "new" | "prelabelling" | "prelabelled" | "in_progress" | "submitted" | "approved" | "rejected";
-  width: number | null;
-  height: number | null;
-  folderPath: string | null;
-}
-
-/** Next page of files for the file browser's infinite scroll. */
-export async function loadMoreFilesAction(input: {
-  projectId: string;
-  folder: string;
-  filter: string;
-  page: number;
-  pageSize: number;
-}): Promise<ActionResult<{ rows: BrowserRow[]; total: number }>> {
+/** Sub-folders of one folder for the tree, loaded when it's opened. */
+export async function folderChildrenAction(
+  projectId: string,
+  folderId: string,
+): Promise<
+  ActionResult<{ id: string; name: string; path: string; totalCount: number; hasChildren: boolean }[]>
+> {
   try {
     const { scope } = await requireOrgScope();
-    const projectId = z.uuid().parse(input.projectId);
-    const filter = z.enum(["all", "mine", "todo", "review", "done", "ocr"]).parse(input.filter);
-    const tree = await folderTree(scope, projectId);
-    const paths = new Map<string, string>();
-    const walk = (nodes: typeof tree.roots) => {
-      for (const n of nodes) {
-        paths.set(n.id, n.path);
-        walk(n.children);
-      }
-    };
-    walk(tree.roots);
-    const folder = input.folder;
-    const folders =
-      folder === "all"
-        ? undefined
-        : folder === "root"
-          ? null
-          : paths.has(folder)
-            ? await subtreeFolderIds(scope, projectId, folder)
-            : undefined;
-    const listing = await pageAssets(scope, projectId, {
-      folders,
-      filter,
-      page: z.number().int().min(1).max(100_000).parse(input.page),
-      pageSize: z.number().int().min(1).max(500).parse(input.pageSize),
-    });
-    return {
-      ok: true,
-      data: {
-        total: listing.total,
-        rows: listing.rows.map((a) => ({
-          id: a.id,
-          name: a.originalName,
-          status: a.status,
-          width: typeof a.mediaMeta.width === "number" ? a.mediaMeta.width : null,
-          height: typeof a.mediaMeta.height === "number" ? a.mediaMeta.height : null,
-          folderPath: a.folderId ? (paths.get(a.folderId) ?? null) : null,
-        })),
-      },
-    };
+    const rows = await folderChildren(scope, z.uuid().parse(projectId), z.uuid().parse(folderId));
+    return { ok: true, data: rows };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Folders matching a search, for the move and folder pickers. */
+export async function searchFoldersAction(
+  projectId: string,
+  term: string,
+): Promise<ActionResult<{ id: string; path: string }[]>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const rows = await searchFolders(scope, z.uuid().parse(projectId), z.string().max(200).parse(term), 50);
+    return { ok: true, data: rows.map((r) => ({ id: r.id, path: r.path })) };
   } catch (err) {
     return fail(err);
   }
