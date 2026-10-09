@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { imageAnnotationSchema } from "@openlabel/contracts";
+import { classificationAnnotationSchema, imageAnnotationSchema } from "@openlabel/contracts";
 import {
   AccessError,
   getLabellingState,
@@ -13,7 +13,7 @@ import {
   subtreeFolderIds,
 } from "@openlabel/db";
 import { AutoRefresh } from "@/features/projects";
-import { Editor, wordsFromAnnotation, wordsFromPrediction } from "@/features/labelling";
+import { ClassifyEditor, Editor, wordsFromAnnotation, wordsFromPrediction } from "@/features/labelling";
 import { getDb } from "@/server/db";
 import { pageCountOf, pageMetaOf, pageParam } from "@/server/media/upright";
 import { loadProject } from "@/server/projects/load";
@@ -63,6 +63,60 @@ export default async function LabelPage({
   ]);
 
   const suffix = folder ? `?folder=${folder}` : "";
+  const strip = assets.map((a) => ({
+    id: a.id,
+    name: a.originalName,
+    href: `/projects/${slug}/label/${a.id}${suffix}`,
+    done: a.status === "approved",
+  }));
+  const reviewView = {
+    status: review.status,
+    currentVersion: review.currentVersion,
+    submittedByMe: review.submittedByUserId === scope.userId,
+    requiredApprovals: review.requiredApprovals,
+    allowSelfApproval: review.allowSelfApproval,
+    approvals: review.approvals,
+    requested: review.requested.map((r) => ({
+      userId: r.userId,
+      name: r.name,
+      latest: r.latest,
+      stale: r.stale,
+    })),
+    history: review.history.map((h) => ({
+      id: h.id,
+      reviewerName: h.reviewerName,
+      decision: h.decision,
+      body: h.body,
+      annotationVersion: h.annotationVersion,
+      createdAt: h.createdAt.toISOString(),
+    })),
+  };
+  const reviewerOptions = reviewers
+    .filter((r) => r.userId !== scope.userId || review.allowSelfApproval)
+    .map((r) => ({ userId: r.userId, name: r.name, email: r.email }));
+
+  if (project.taskType.endsWith(".classification")) {
+    const saved = classificationAnnotationSchema.safeParse(state.annotation?.data);
+    return (
+      <ClassifyEditor
+        key={`${assetId}:${String(state.annotation?.version ?? 0)}`}
+        assetId={assetId}
+        assetName={state.asset.originalName}
+        projectName={project.name}
+        imageUrl={`/api/assets/${assetId}/file`}
+        classes={project.classes}
+        multiLabel={project.multiLabel}
+        initialLabels={saved.success ? saved.data.labels : []}
+        baseVersion={state.annotation?.version ?? 0}
+        backHref={`/projects/${slug}${suffix}`}
+        strip={strip}
+        review={reviewView}
+        reviewers={reviewerOptions}
+        canReview={REVIEWER_ROLES.includes(scope.role)}
+      />
+    );
+  }
+
   const meta = state.asset.mediaMeta;
 
   // A PDF is one file; the editor shows one of its pages (?page=N), with a page strip if several.
@@ -129,37 +183,9 @@ export default async function LabelPage({
         backHref={`/projects/${slug}${suffix}`}
         position={around.position}
         total={around.total}
-        strip={assets.map((a) => ({
-          id: a.id,
-          name: a.originalName,
-          href: `/projects/${slug}/label/${a.id}${suffix}`,
-          done: a.status === "approved",
-        }))}
-        review={{
-          status: review.status,
-          currentVersion: review.currentVersion,
-          submittedByMe: review.submittedByUserId === scope.userId,
-          requiredApprovals: review.requiredApprovals,
-          allowSelfApproval: review.allowSelfApproval,
-          approvals: review.approvals,
-          requested: review.requested.map((r) => ({
-            userId: r.userId,
-            name: r.name,
-            latest: r.latest,
-            stale: r.stale,
-          })),
-          history: review.history.map((h) => ({
-            id: h.id,
-            reviewerName: h.reviewerName,
-            decision: h.decision,
-            body: h.body,
-            annotationVersion: h.annotationVersion,
-            createdAt: h.createdAt.toISOString(),
-          })),
-        }}
-        reviewers={reviewers
-          .filter((r) => r.userId !== scope.userId || review.allowSelfApproval)
-          .map((r) => ({ userId: r.userId, name: r.name, email: r.email }))}
+        strip={strip}
+        review={reviewView}
+        reviewers={reviewerOptions}
         canReview={REVIEWER_ROLES.includes(scope.role)}
       />
     </>

@@ -27,10 +27,13 @@ export {
 export { setActiveOrganization } from "./session-org.js";
 export { listRecentAudit, type AuditRow } from "./audit.js";
 export {
+  cleanClasses,
   createProject,
   getProjectById,
   getProjectBySlug,
   listProjects,
+  setProjectClasses,
+  type ProjectClass,
   type ProjectRow,
   type ProjectWithCounts,
 } from "./projects.js";
