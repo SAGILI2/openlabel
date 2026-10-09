@@ -155,6 +155,7 @@ describe("labelling", () => {
       result: { lines: [] },
       minConf: 0.4,
       latencyMs: 12,
+      words: 0,
     });
     await completeJob(conn.db, job.id);
 

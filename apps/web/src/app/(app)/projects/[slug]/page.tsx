@@ -14,7 +14,7 @@ import { AutoRefresh } from "@/features/projects";
 import { loadProject } from "@/server/projects/load";
 
 const PAGE_SIZE = 100;
-const FILTERS = new Set<string>(["all", "mine", "todo", "review", "done", "ocr"]);
+const FILTERS = new Set<string>(["all", "mine", "todo", "review", "done", "ocr", "notext"]);
 const SORTS = new Set<string>(["oldest", "newest", "name", "name-desc"]);
 
 export default async function ProjectFilesPage({

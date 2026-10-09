@@ -18,6 +18,8 @@ const regionBase = z.object({
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
   /** Excluded from training and from evaluation scoring ("don't care"). */
   ignore: z.boolean().default(false),
+  /** Page of a multi-page document (PDF) the region is on, from 1. Absent for single images. */
+  page: z.number().int().min(1).optional(),
 });
 
 /** A word or line of text. */
@@ -26,7 +28,15 @@ export const textRegionSchema = regionBase.extend({
   text: z.string(),
   lineId: z.string().optional(),
   flags: z.array(textFlagSchema).default([]),
+  /** The model's confidence in `ocrText` (kept after a person edits the text). */
   conf: confidenceSchema.optional(),
+  /**
+   * What the OCR read, kept so a correction can be told from an untouched word (compared exactly,
+   * case included) and so labels can score the model. Absent for boxes a person drew.
+   */
+  ocrText: z.string().optional(),
+  /** A person confirmed the text is right without changing it. */
+  verified: z.boolean().optional(),
   /** Overrides the label's value type for this region (e.g. one field that must be a date). */
   valueType: valueTypeSchema.optional(),
 });

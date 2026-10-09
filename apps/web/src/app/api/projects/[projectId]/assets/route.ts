@@ -17,12 +17,14 @@ import { getStore } from "@/server/storage";
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const IMAGE_TYPES: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/webp": "webp",
   "image/tiff": "tif",
   "image/bmp": "bmp",
+  "application/pdf": "pdf",
 };
 
 function problem(status: number, title: string, detail: string) {
@@ -33,7 +35,7 @@ function problem(status: number, title: string, detail: string) {
 }
 
 /**
- * Upload one image to a project (multipart field `file`). Stores the original in object
+ * Upload one image or PDF to a project (multipart field `file`). Stores the original in object
  * storage, content-addressed, and queues it for OCR pre-labelling. Re-uploading the same bytes
  * returns the existing asset.
  *
@@ -81,19 +83,31 @@ export async function POST(request: Request, ctx: { params: Promise<{ projectId:
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File))
-    return problem(400, "No file", "Send the image in a multipart field named file.");
-  if (file.size === 0 || file.size > MAX_BYTES) {
-    return problem(413, "File size not allowed", "Images must be between 1 byte and 25 MB.");
-  }
+    return problem(400, "No file", "Send the file in a multipart field named file.");
   const ext = IMAGE_TYPES[file.type];
-  if (!ext) return problem(415, "Unsupported type", "Upload PNG, JPEG, WebP, TIFF or BMP images.");
+  if (!ext) return problem(415, "Unsupported type", "Upload PDFs or PNG, JPEG, WebP, TIFF or BMP images.");
+  const pdf = ext === "pdf";
+  if (file.size === 0 || file.size > (pdf ? MAX_PDF_BYTES : MAX_BYTES)) {
+    return problem(
+      413,
+      "File size not allowed",
+      pdf ? "PDFs must be between 1 byte and 100 MB." : "Images must be between 1 byte and 25 MB.",
+    );
+  }
 
   const body = new Uint8Array(await file.arrayBuffer());
-  let dims: { width?: number; height?: number };
-  try {
-    dims = imageSize(body);
-  } catch {
-    return problem(415, "Unreadable image", "The file isn't a valid image.");
+  // A PDF stays one file; its pages are counted and rendered by the OCR worker.
+  let dims: { width?: number; height?: number } = {};
+  if (pdf) {
+    if (new TextDecoder().decode(body.subarray(0, 5)) !== "%PDF-") {
+      return problem(415, "Unreadable PDF", "The file isn't a valid PDF.");
+    }
+  } else {
+    try {
+      dims = imageSize(body);
+    } catch {
+      return problem(415, "Unreadable image", "The file isn't a valid image.");
+    }
   }
   const folderId = form?.get("folderId");
   const relativePath = form?.get("relativePath");
@@ -113,14 +127,14 @@ export async function POST(request: Request, ctx: { params: Promise<{ projectId:
     const { asset, created } = await registerAsset(scope, {
       projectId,
       folderId: target,
-      kind: "image",
+      kind: pdf ? "pdf" : "image",
       storageKey: key,
       sha256,
       byteSize: body.byteLength,
       mimeType: file.type,
       // Browsers send folder uploads with the path in the name; keep only the file name.
       originalName: (file.name.split(/[/\\]/).pop() || file.name).slice(0, 255),
-      mediaMeta: { width: dims.width, height: dims.height },
+      mediaMeta: pdf ? {} : { width: dims.width, height: dims.height },
     });
     return NextResponse.json(
       { id: asset.id, created, status: asset.status },

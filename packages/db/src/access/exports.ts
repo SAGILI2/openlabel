@@ -179,6 +179,7 @@ export interface ExportJobData {
     storageKey: string;
     mimeType: string;
     originalName: string;
+    kind: string;
     mediaMeta: Record<string, unknown>;
     annotationVersion: number;
     annotation: Record<string, unknown>;
@@ -199,6 +200,7 @@ export async function loadExportJob(db: Database, exportId: string): Promise<Exp
       storageKey: assets.storageKey,
       mimeType: assets.mimeType,
       originalName: assets.originalName,
+      kind: assets.kind,
       mediaMeta: assets.mediaMeta,
       annotationVersion: annotations.version,
       annotation: annotations.data,

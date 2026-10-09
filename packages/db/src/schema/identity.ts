@@ -1,4 +1,4 @@
-import { boolean, index, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { id, timestamps } from "./columns.js";
 
 /** Organisation-level roles (architecture section 10.4). Per-project overrides live on project_members. */
@@ -24,6 +24,8 @@ export const users = pgTable(
     emailVerified: boolean().notNull().default(false),
     image: text(),
     twoFactorEnabled: boolean().notNull().default(false),
+    /** Personal display settings (e.g. editor toggles); see access/preferences. */
+    preferences: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
   (t) => [uniqueIndex("users_email_uq").on(t.email)],

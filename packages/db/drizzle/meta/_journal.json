@@ -57,6 +57,34 @@
       "when": 1791369219304,
       "tag": "0007_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791443510778,
+      "tag": "0008_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791445351919,
+      "tag": "0009_prediction_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791449327945,
+      "tag": "0010_prediction_words",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791523512924,
+      "tag": "0011_job_priority",
+      "breakpoints": true
     }
   ]
 }

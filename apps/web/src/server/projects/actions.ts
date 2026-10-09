@@ -15,6 +15,8 @@ import {
   deleteFolder,
   getProjectById,
   moveAssets,
+  queueReocr,
+  reocrTurned,
   renameFolder,
   reviewAsset,
   saveAnnotation,
@@ -378,6 +380,53 @@ export async function searchFoldersAction(
     const { scope } = await requireOrgScope();
     const rows = await searchFolders(scope, z.uuid().parse(projectId), z.string().max(200).parse(term), 50);
     return { ok: true, data: rows.map((r) => ({ id: r.id, path: r.path })) };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Reads the chosen files again with OCR; labels people saved are kept. */
+export async function reocrFilesAction(
+  projectId: string,
+  assetIds: string[],
+): Promise<ActionResult<{ queued: number; skipped: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const r = await queueReocr(scope, z.uuid().parse(projectId), {
+      assetIds: z.array(z.uuid()).max(100_000).parse(assetIds),
+    });
+    refresh();
+    return { ok: true, data: r };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Reads every file whose OCR found no text again (they are often turned the wrong way). */
+export async function reocrNoTextAction(
+  projectId: string,
+): Promise<ActionResult<{ queued: number; skipped: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const r = await queueReocr(scope, z.uuid().parse(projectId), "no-text");
+    refresh();
+    return { ok: true, data: r };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** A person turned the page: read it that way, and remember their answer for orientation metrics. */
+export async function reocrTurnedAction(assetId: string, rotate: number, page = 1): Promise<ActionResult> {
+  try {
+    const { scope } = await requireOrgScope();
+    await reocrTurned(
+      scope,
+      z.uuid().parse(assetId),
+      z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).parse(rotate),
+      z.number().int().min(1).max(10_000).parse(page),
+    );
+    return { ok: true, data: undefined };
   } catch (err) {
     return fail(err);
   }

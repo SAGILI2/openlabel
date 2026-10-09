@@ -8,7 +8,8 @@ import {
   type JobRow,
 } from "@openlabel/db";
 import { createZipSink, DEFAULT_OPTIONS, EXPORTERS, type Snapshot } from "@openlabel/exporters";
-import { exportKey, type ObjectStore } from "@openlabel/storage";
+import { exportKey, pageKey, type ObjectStore } from "@openlabel/storage";
+import sharp from "sharp";
 
 export interface ExportDeps {
   db: Database;
@@ -41,23 +42,55 @@ export async function runExport(deps: ExportDeps, job: JobRow): Promise<void> {
     projectName: data.export.projectName,
     taskType: data.export.taskType,
     createdAt: data.export.createdAt.toISOString(),
-    items: data.items.map((it) => ({
-      assetId: it.assetId,
+    items: [],
+  };
+  // Where each exported image comes from and how far the OCR turned it. A PDF becomes one item
+  // per page a person saved (`<asset>#p<n>`), so every format exports pages like images.
+  const sources = new Map<string, { key: string; turn: number }>();
+  for (const it of data.items) {
+    const annotation = imageAnnotationSchema.parse(it.annotation);
+    const base = {
       fileName: it.originalName,
       mimeType: it.mimeType,
-      width: typeof it.mediaMeta.width === "number" ? it.mediaMeta.width : 0,
-      height: typeof it.mediaMeta.height === "number" ? it.mediaMeta.height : 0,
       split: it.split,
       annotationVersion: it.annotationVersion,
-      annotation: imageAnnotationSchema.parse(it.annotation),
-    })),
-  };
-  const keys = new Map(data.items.map((it) => [it.assetId, it.storageKey]));
-  const load = async (assetId: string) => {
-    const key = keys.get(assetId);
-    const object = key ? await deps.store.get(key) : null;
-    if (!object) throw new Error(`image missing in storage for asset ${assetId}`);
-    return object.body;
+    };
+    if (it.kind !== "pdf") {
+      snapshot.items.push({
+        ...base,
+        assetId: it.assetId,
+        width: num(it.mediaMeta.width),
+        height: num(it.mediaMeta.height),
+        annotation,
+      });
+      sources.set(it.assetId, { key: it.storageKey, turn: num(it.mediaMeta.rotation) });
+      continue;
+    }
+    const pages = Array.isArray(it.mediaMeta.pages) ? (it.mediaMeta.pages as Record<string, unknown>[]) : [];
+    const stem = it.originalName.replace(/\.pdf$/i, "");
+    for (const n of annotation.pages ?? [1]) {
+      const meta = pages[n - 1] ?? {};
+      const id = `${it.assetId}#p${String(n)}`;
+      snapshot.items.push({
+        ...base,
+        assetId: id,
+        fileName: `${stem}_p${String(n)}.jpg`,
+        mimeType: "image/jpeg",
+        width: num(meta.width),
+        height: num(meta.height),
+        annotation: { ...annotation, regions: annotation.regions.filter((r) => (r.page ?? 1) === n) },
+      });
+      sources.set(id, { key: pageKey(it.storageKey, n), turn: num(meta.rotation) });
+    }
+  }
+  // Boxes were drawn on the page turned upright, so export from that same turned page.
+  const load = async (id: string) => {
+    const source = sources.get(id);
+    const object = source ? await deps.store.get(source.key) : null;
+    if (!source || !object) throw new Error(`image missing in storage for ${id}`);
+    if (!source.turn) return object.body;
+    const straight = await sharp(object.body).rotate().toBuffer();
+    return new Uint8Array(await sharp(straight).rotate(-source.turn).jpeg({ quality: 95 }).toBuffer());
   };
   const cropPadding =
     typeof data.export.options.cropPadding === "number"
@@ -114,4 +147,8 @@ export async function runExport(deps: ExportDeps, job: JobRow): Promise<void> {
     bytes: size,
     ms: Date.now() - started,
   });
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" ? v : 0;
 }

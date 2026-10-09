@@ -142,9 +142,17 @@ export async function getAsset(scope: OrgScope, assetId: string): Promise<AssetR
 }
 
 /** File-browser filters, as the database sees them. */
-export type AssetFilter = "all" | "mine" | "todo" | "review" | "done" | "ocr";
+export type AssetFilter = "all" | "mine" | "todo" | "review" | "done" | "ocr" | "notext";
 
-const FILTER_STATUSES: Record<Exclude<AssetFilter, "all" | "mine">, AssetStatus[]> = {
+/** Files whose latest OCR read of some page found no words (often a page turned the wrong way). */
+const noText = sql`exists (
+  select 1 from (
+    select distinct on (p.page) p.words from ${predictions} p
+    where p.asset_id = ${assets.id} order by p.page, p.created_at desc
+  ) latest where latest.words = 0
+)`;
+
+const FILTER_STATUSES: Record<Exclude<AssetFilter, "all" | "mine" | "notext">, AssetStatus[]> = {
   todo: ["prelabelled", "in_progress", "rejected"],
   review: ["submitted"],
   done: ["approved"],
@@ -203,10 +211,16 @@ export async function pageAssets(
   );
   const mine = sql`(${assets.status} = 'submitted' and exists (select 1 from ${reviewRequests} rr
     where rr.asset_id = ${assets.id} and rr.reviewer_user_id = ${scope.userId}))`;
-  const inStatuses = (key: Exclude<AssetFilter, "all" | "mine">) =>
+  const inStatuses = (key: Exclude<AssetFilter, "all" | "mine" | "notext">) =>
     inArray(assets.status, FILTER_STATUSES[key]);
   const filterSql =
-    opts.filter === "all" ? sql`true` : opts.filter === "mine" ? mine : inStatuses(opts.filter);
+    opts.filter === "all"
+      ? sql`true`
+      : opts.filter === "mine"
+        ? mine
+        : opts.filter === "notext"
+          ? noText
+          : inStatuses(opts.filter);
 
   const [countRow] = await scope.db
     .select({
@@ -216,10 +230,11 @@ export async function pageAssets(
       review: sql<number>`(count(*) filter (where ${inStatuses("review")}))::int`,
       done: sql<number>`(count(*) filter (where ${inStatuses("done")}))::int`,
       ocr: sql<number>`(count(*) filter (where ${inStatuses("ocr")}))::int`,
+      notext: sql<number>`(count(*) filter (where ${noText}))::int`,
     })
     .from(assets)
     .where(base);
-  const counts = countRow ?? { all: 0, mine: 0, todo: 0, review: 0, done: 0, ocr: 0 };
+  const counts = countRow ?? { all: 0, mine: 0, todo: 0, review: 0, done: 0, ocr: 0, notext: 0 };
   const size = Math.min(Math.max(opts.pageSize, 1), 500);
   const rows = await scope.db
     .select({ ...columns, folderPath: folders.path })
@@ -339,6 +354,8 @@ export interface LabellingState {
     createdAt: Date;
   } | null;
   annotation: { version: number; data: Record<string, unknown>; createdAt: Date } | null;
+  /** Latest prediction of each page of a multi-page document (PDF), by page number. */
+  pagePredictions: Map<number, Record<string, unknown>>;
 }
 
 /** Everything the editor needs: the asset, its latest prediction and latest annotation. */
@@ -352,16 +369,29 @@ export async function getLabellingState(scope: OrgScope, assetId: string): Promi
       createdAt: predictions.createdAt,
     })
     .from(predictions)
-    .where(and(eq(predictions.assetId, assetId), eq(predictions.orgId, scope.orgId)))
+    .where(and(eq(predictions.assetId, assetId), eq(predictions.orgId, scope.orgId), eq(predictions.page, 1)))
     .orderBy(desc(predictions.createdAt))
     .limit(1);
+  const pageRows =
+    asset.kind === "pdf"
+      ? await scope.db
+          .selectDistinctOn([predictions.page], { page: predictions.page, result: predictions.result })
+          .from(predictions)
+          .where(and(eq(predictions.assetId, assetId), eq(predictions.orgId, scope.orgId)))
+          .orderBy(predictions.page, desc(predictions.createdAt))
+      : [];
   const [annotation] = await scope.db
     .select({ version: annotations.version, data: annotations.data, createdAt: annotations.createdAt })
     .from(annotations)
     .where(and(eq(annotations.assetId, assetId), eq(annotations.orgId, scope.orgId)))
     .orderBy(desc(annotations.version))
     .limit(1);
-  return { asset, prediction: prediction ?? null, annotation: annotation ?? null };
+  return {
+    asset,
+    prediction: prediction ?? null,
+    annotation: annotation ?? null,
+    pagePredictions: new Map(pageRows.map((r) => [r.page, r.result])),
+  };
 }
 
 /**

@@ -11,6 +11,11 @@ export interface ObjectStore {
   delete(key: string): Promise<void>;
 }
 
+/** Key of one rendered page (JPEG, as it sits in the file) of a multi-page document. */
+export function pageKey(storageKey: string, page: number): string {
+  return `${storageKey}.p${String(page)}.jpg`;
+}
+
 /** Key for an uploaded original: content-addressed inside its organisation and project. */
 export function assetKey(orgId: string, projectId: string, sha256: string, extension: string): string {
   const ext = extension

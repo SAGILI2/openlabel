@@ -17,6 +17,7 @@ import {
   List,
   Loader2,
   Play,
+  RefreshCw,
   Search,
   Send,
   Trash2,
@@ -45,6 +46,8 @@ import {
   deleteFolderAction,
   moveAssetsAction,
   renameFolderAction,
+  reocrFilesAction,
+  reocrNoTextAction,
 } from "@/server/projects/actions";
 import { FolderPicker } from "./folder-picker";
 import { NavigationPendingProvider, useNavigationPending } from "./navigation-pending";
@@ -61,7 +64,7 @@ export interface BrowserFile {
   folderPath: string | null;
 }
 
-type Filter = "all" | "mine" | "todo" | "review" | "done" | "ocr";
+type Filter = "all" | "mine" | "todo" | "review" | "done" | "ocr" | "notext";
 export type Sort = "oldest" | "newest" | "name" | "name-desc";
 export const DEFAULT_PAGE_SIZE = 100;
 const PAGE_SIZES = [50, 100, 200, 500];
@@ -79,6 +82,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "review", label: "In review" },
   { id: "done", label: "Approved" },
   { id: "ocr", label: "OCR running" },
+  { id: "notext", label: "No text" },
 ];
 
 function bucket(status: BrowserFile["status"]): Exclude<Filter, "all" | "mine"> {
@@ -294,6 +298,37 @@ function FileBrowserInner(props: Props) {
     });
   }
 
+  /**
+   * Reads files again with OCR: the selected ones, or every file whose OCR found no text. Saved
+   * labels are kept; each file just gets a fresh OCR draft.
+   */
+  async function reocr(ids: string[] | "no-text") {
+    const n = ids === "no-text" ? counts.notext : ids.length;
+    const files = `${n.toLocaleString()} ${n === 1 ? "file" : "files"}`;
+    const ok = await dialogs.confirm({
+      title: ids === "no-text" ? `Re-run OCR on ${files} with no text?` : `Re-run OCR on ${files}?`,
+      description:
+        ids === "no-text"
+          ? "These came back empty, usually because the page was sideways or upside down. They'll be turned the right way up and read again."
+          : "Each file is read again and turned the right way up. Labels people already saved are kept; the new reading shows on files nobody has labelled yet.",
+      confirmLabel: `Re-run OCR on ${files}`,
+    });
+    if (!ok) return;
+    setSelected(new Set());
+    startTransition(async () => {
+      const r =
+        ids === "no-text"
+          ? await reocrNoTextAction(props.projectId)
+          : await reocrFilesAction(props.projectId, ids);
+      if (!r.ok) flash(r.error);
+      else
+        flash(
+          `Queued ${r.data.queued.toLocaleString()} for OCR.` +
+            (r.data.skipped ? ` ${r.data.skipped.toLocaleString()} already waiting.` : ""),
+        );
+    });
+  }
+
   const folderNameRules = (v: string) =>
     v.includes("/") || v.includes("\\")
       ? "Folder names can't contain slashes."
@@ -459,7 +494,11 @@ function FileBrowserInner(props: Props) {
           </Popover>
           <h2 className="hidden truncate text-[14px] font-semibold lg:block">{props.folderName}</h2>
           <div className="bg-muted flex rounded-md p-0.5" role="tablist" aria-label="Filter">
-            {FILTERS.filter((f) => f.id !== "mine" || props.canReview).map((f) => (
+            {FILTERS.filter(
+              (f) =>
+                (f.id !== "mine" || props.canReview) &&
+                (f.id !== "notext" || counts.notext > 0 || filter === "notext"),
+            ).map((f) => (
               <button
                 key={f.id}
                 type="button"
@@ -546,6 +585,20 @@ function FileBrowserInner(props: Props) {
               >
                 <Send aria-hidden />
                 {selected.size > 0 ? `Send ${String(selected.size)} for review` : "Send for review"}
+              </Button>
+            )}
+            {props.canEdit && (selected.size > 0 || filter === "notext") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void reocr(selected.size > 0 ? [...selected] : "no-text");
+                }}
+              >
+                <RefreshCw aria-hidden />
+                {selected.size > 0
+                  ? `Re-run OCR on ${String(selected.size)}`
+                  : `Re-run OCR on all ${counts.notext.toLocaleString()}`}
               </Button>
             )}
             {selected.size > 0 && props.canEdit && (
@@ -654,7 +707,7 @@ function FileBrowserInner(props: Props) {
             ref={fileInput}
             type="file"
             multiple
-            accept="image/*"
+            accept="image/*,application/pdf"
             className="hidden"
             onChange={(e) => {
               void upload(itemsFromInput(e.target.files));
@@ -737,7 +790,7 @@ function FileBrowserInner(props: Props) {
                     : "Nothing matches this filter"}
               </p>
               {props.files.length === 0 && props.canEdit && (
-                <p className="text-[13px]">Drop images or a folder anywhere here, or use Upload.</p>
+                <p className="text-[13px]">Drop images, PDFs or a folder anywhere here, or use Upload.</p>
               )}
             </div>
           ) : props.view === "grid" ? (

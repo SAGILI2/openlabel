@@ -1,0 +1,1 @@
+ALTER TABLE "predictions" ADD COLUMN "page" integer DEFAULT 1 NOT NULL;
