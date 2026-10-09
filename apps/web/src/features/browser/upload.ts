@@ -1,6 +1,13 @@
 "use client";
 
-export const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp", "image/tiff", "image/bmp"];
+export const ACCEPTED_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/tiff",
+  "image/bmp",
+  "application/pdf",
+];
 
 export interface UploadItem {
   file: File;
@@ -81,7 +88,7 @@ export async function uploadAll(
   const state: UploadProgress = {
     total: images.length,
     done: 0,
-    failed: skipped > 0 ? [{ name: `${String(skipped)} file(s)`, reason: "not a supported image type" }] : [],
+    failed: skipped > 0 ? [{ name: `${String(skipped)} file(s)`, reason: "not an image or PDF" }] : [],
   };
   let failedCount = state.failed.length;
   let lastReport = 0;

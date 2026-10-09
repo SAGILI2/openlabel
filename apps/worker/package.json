@@ -17,7 +17,8 @@
     "@openlabel/db": "workspace:*",
     "@openlabel/emails": "workspace:*",
     "@openlabel/exporters": "workspace:*",
-    "@openlabel/storage": "workspace:*"
+    "@openlabel/storage": "workspace:*",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/node": "^24.19.1"

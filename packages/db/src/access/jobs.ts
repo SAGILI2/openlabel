@@ -23,6 +23,8 @@ export async function enqueueJob(
     payload: Record<string, unknown>;
     dedupeKey?: string;
     runAfter?: Date;
+    /** Higher runs first (default 0). */
+    priority?: number;
   },
 ): Promise<void> {
   await db
@@ -33,6 +35,7 @@ export async function enqueueJob(
       payload: job.payload,
       dedupeKey: job.dedupeKey ?? null,
       ...(job.runAfter ? { runAfter: job.runAfter } : {}),
+      ...(job.priority ? { priority: job.priority } : {}),
     })
     .onConflictDoNothing({ target: jobs.dedupeKey });
 }
@@ -64,7 +67,7 @@ export async function claimJobs(
         and run_after <= now()
         and (status = 'queued'
              or (status = 'running' and locked_at < now() - make_interval(secs => ${staleAfterMs / 1000})))
-      order by run_after
+      order by priority desc, run_after
       limit ${limit}
       for update skip locked
     )

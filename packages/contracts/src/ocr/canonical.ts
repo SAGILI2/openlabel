@@ -29,6 +29,22 @@ export const canonicalFieldSchema = z.object({
   wordIds: z.array(z.string()).default([]),
 });
 
+/**
+ * Page-orientation decision. `predicted` is the orientation model's own guess; `applied` is what
+ * was used after comparing readings. Degrees counter-clockwise, 0/90/180/270. Comparing `applied`
+ * (or a reviewer's correction) with `predicted` gives orientation accuracy per model.
+ */
+export const orientationDecisionSchema = z.object({
+  model: z.string().nullable(),
+  predicted: z.number().nullable(),
+  predictedConf: z.number().min(0).max(1).nullable(),
+  applied: z.number(),
+  /** `manual`: a person said how the page is turned; `applied` is their answer. */
+  method: z.enum(["straight", "model", "model+confidence", "disabled", "manual"]),
+  candidates: z.array(z.object({ rotation: z.number(), words: z.number().int(), meanConf: z.number() })),
+});
+export type OrientationDecision = z.infer<typeof orientationDecisionSchema>;
+
 export const canonicalOcrPageSchema = z.object({
   engine: z.string().min(1),
   engineVersion: z.string().min(1),
@@ -37,7 +53,10 @@ export const canonicalOcrPageSchema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   unit: z.literal("px").default("px"),
-  /** Degrees the engine rotated the page; boxes are already mapped back to the original. */
+  /**
+   * Degrees (0/90/180/270, counter-clockwise) the page was turned to read it upright. Boxes,
+   * width and height are of that upright page; clients show the original turned the same way.
+   */
   rotationApplied: z.number().default(0),
   /** `engine` when the engine produced lines; `derived` when the platform grouped words into lines. */
   linesSource: z.enum(["engine", "derived"]).default("engine"),
@@ -49,6 +68,8 @@ export const canonicalOcrPageSchema = z.object({
       costUsd: z.number().nonnegative().optional(),
       rawRef: z.string().optional(),
       error: z.string().optional(),
+      /** How the page orientation was decided, so orientation can be measured per model. */
+      orientation: orientationDecisionSchema.optional(),
     })
     .default({}),
 });

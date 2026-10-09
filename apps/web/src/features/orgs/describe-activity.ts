@@ -49,6 +49,10 @@ export function describeActivity(e: ActivityView): string {
       return `${who} commented on a page`;
     case "export.created":
       return `${who} started an export of${count(e.details.items, "page") || " pages"}`;
+    case "ocr.rerun":
+      return e.details.reason === "turned"
+        ? `${who} turned a page and had it read again`
+        : `${who} re-ran OCR on${count(e.details.files, "file") || " files"}`;
     case "assets.deleted":
       return `${who} deleted${count(e.details.count, "file") || " files"}`;
     default:

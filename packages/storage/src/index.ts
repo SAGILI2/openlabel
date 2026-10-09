@@ -4,7 +4,7 @@ import { LocalStore } from "./local.js";
 import { S3Store } from "./s3.js";
 import type { ObjectStore } from "./store.js";
 
-export { assetKey, assertSafeKey, exportKey, type ObjectStore } from "./store.js";
+export { assetKey, assertSafeKey, exportKey, pageKey, type ObjectStore } from "./store.js";
 export { LocalStore } from "./local.js";
 export { S3Store, type S3StoreOptions } from "./s3.js";
 

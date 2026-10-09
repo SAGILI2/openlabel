@@ -58,6 +58,11 @@ export {
   markPrelabelFailed,
   markPrelabelling,
   storePrediction,
+  storePagePrediction,
+  finishDocument,
+  predictedPages,
+  type PageMeta,
+  type ReocrOptions,
   type PrelabelTarget,
 } from "./prelabel.js";
 export {
@@ -109,3 +114,12 @@ export {
   type ReviewRules,
   type ReviewState,
 } from "./reviews.js";
+export { orientationStats, type OrientationStats } from "./orientation.js";
+export {
+  DEFAULT_PREFERENCES,
+  getPreferences,
+  readPreferences,
+  updatePreferences,
+  type Preferences,
+} from "./preferences.js";
+export { countNoText, ocrPending, queueReocr, reocrTurned } from "./reocr.js";

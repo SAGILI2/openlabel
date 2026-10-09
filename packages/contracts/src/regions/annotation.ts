@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { imageRegionSchema } from "./region.js";
 
-/** All regions of one image asset plus whole-image tags, with referential checks. */
+/**
+ * All regions of one asset plus whole-asset tags, with referential checks. For a PDF this holds
+ * every page; each region says which page it is on.
+ */
 export const imageAnnotationSchema = z
   .object({
     tags: z.array(z.string().min(1)).default([]),
     regions: z.array(imageRegionSchema),
+    /** Multi-page documents: pages a person has saved (the rest still show the OCR draft). */
+    pages: z.array(z.number().int().min(1)).optional(),
   })
   .superRefine((value, ctx) => {
     const ids = new Set<string>();

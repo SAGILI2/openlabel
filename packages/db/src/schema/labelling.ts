@@ -30,9 +30,13 @@ export const predictions = pgTable(
       .references(() => assets.id, { onDelete: "cascade" }),
     engine: text().notNull(),
     engineVersion: text().notNull(),
+    /** Page of a multi-page document (PDF), from 1; always 1 for images. */
+    page: integer().notNull().default(1),
     result: jsonb().$type<Record<string, unknown>>().notNull(),
     /** Lowest confidence in the result; sorts work queues (least sure first). */
     minConf: real(),
+    /** Words the model read; 0 means it found no text (often a page the wrong way up). */
+    words: integer(),
     latencyMs: integer(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -75,6 +79,8 @@ export const jobs = pgTable(
     kind: text().notNull(),
     payload: jsonb().$type<Record<string, unknown>>().notNull(),
     status: jobStatus().notNull().default("queued"),
+    /** Higher runs first: a person waiting in the editor beats a bulk re-run. */
+    priority: integer().notNull().default(0),
     attempts: integer().notNull().default(0),
     maxAttempts: integer().notNull().default(5),
     runAfter: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -87,7 +93,7 @@ export const jobs = pgTable(
     finishedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
-    index("jobs_claim_idx").on(t.kind, t.status, t.runAfter),
+    index("jobs_claim_idx").on(t.kind, t.status, t.priority, t.runAfter),
     uniqueIndex("jobs_dedupe_uq").on(t.dedupeKey),
   ],
 );

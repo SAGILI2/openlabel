@@ -120,6 +120,8 @@
     @apply border-border outline-ring/50;
   }
   html {
+    /* No browser back/forward swipe or bounce: the app owns horizontal gestures. */
+    overscroll-behavior-x: none;
     font-feature-settings:
       "tnum" 1,
       "cv11" 1;
@@ -149,4 +151,22 @@
   &::-webkit-scrollbar {
     display: none;
   }
+}
+
+/* A thin, quiet scrollbar that only darkens on hover. */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent) transparent;
+  &:hover {
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent) transparent;
+  }
+}
+
+/* No scrollbar; the content fades out at the top and bottom edges instead. */
+@utility scroll-fade {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  mask-image: linear-gradient(to bottom, transparent, black 14px, black calc(100% - 18px), transparent);
 }
