@@ -65,7 +65,7 @@ describe("classification projects", () => {
     ]);
   });
 
-  it("starts uploads at to-do without queueing OCR", async () => {
+  it("starts image uploads at to-do without queueing OCR", async () => {
     const { scope, project } = await setup();
     const { asset } = await registerAsset(scope, {
       projectId: project.id,
@@ -79,6 +79,26 @@ describe("classification projects", () => {
     });
     expect(asset.status).toBe("in_progress");
     expect(await conn.db.select().from(jobs).where(eq(jobs.kind, "prelabel"))).toEqual([]);
+  });
+
+  it("queues PDF rendering without queueing OCR", async () => {
+    const { scope, project } = await setup();
+    const { asset } = await registerAsset(scope, {
+      projectId: project.id,
+      kind: "pdf",
+      storageKey: "k/pdf",
+      sha256: "pdf",
+      byteSize: 1,
+      mimeType: "application/pdf",
+      originalName: "document.pdf",
+      mediaMeta: {},
+    });
+    expect(asset.status).toBe("in_progress");
+    const queued = await conn.db
+      .select({ payload: jobs.payload })
+      .from(jobs)
+      .where(eq(jobs.kind, "prelabel"));
+    expect(queued).toEqual([{ payload: { assetId: asset.id, renderOnly: true } }]);
   });
 
   it("renames freely but refuses to remove a class already used in labels", async () => {

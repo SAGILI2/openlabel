@@ -25,10 +25,28 @@ export default async function LabelPage({
   searchParams,
 }: {
   params: Promise<{ slug: string; assetId: string }>;
-  searchParams: Promise<{ folder?: string; page?: string }>;
+  searchParams: Promise<{
+    folder?: string;
+    page?: string;
+    listPage?: string;
+    view?: string;
+    filter?: string;
+    size?: string;
+    q?: string;
+    sort?: string;
+  }>;
 }) {
   const [{ slug, assetId }, query] = await Promise.all([params, searchParams]);
   const { scope, project } = await loadProject(slug);
+  const listQuery = new URLSearchParams();
+  if (query.folder && query.folder !== "all") listQuery.set("folder", query.folder);
+  if (query.view === "grid") listQuery.set("view", "grid");
+  if (query.filter && query.filter !== "all") listQuery.set("filter", query.filter);
+  if (query.listPage && query.listPage !== "1") listQuery.set("page", query.listPage);
+  if (query.size) listQuery.set("size", query.size);
+  if (query.q) listQuery.set("q", query.q);
+  if (query.sort && query.sort !== "oldest") listQuery.set("sort", query.sort);
+  const listSuffix = listQuery.toString() ? `?${listQuery.toString()}` : "";
   const folder =
     query.folder === "root"
       ? "root"
@@ -62,11 +80,11 @@ export default async function LabelPage({
     ocrPending(scope, assetId),
   ]);
 
-  const suffix = folder ? `?folder=${folder}` : "";
+  const backHref = `/projects/${slug}${listSuffix}`;
   const strip = assets.map((a) => ({
     id: a.id,
     name: a.originalName,
-    href: `/projects/${slug}/label/${a.id}${suffix}`,
+    href: `/projects/${slug}/label/${a.id}${listSuffix}`,
     done: a.status === "approved",
   }));
   const reviewView = {
@@ -98,22 +116,25 @@ export default async function LabelPage({
   if (project.taskType.endsWith(".classification")) {
     const saved = classificationAnnotationSchema.safeParse(state.annotation?.data);
     return (
-      <ClassifyEditor
-        key={`${assetId}:${String(state.annotation?.version ?? 0)}`}
-        assetId={assetId}
-        assetName={state.asset.originalName}
-        projectName={project.name}
-        imageUrl={`/api/assets/${assetId}/file`}
-        classes={project.classes}
-        multiLabel={project.multiLabel}
-        initialLabels={saved.success ? saved.data.labels : []}
-        baseVersion={state.annotation?.version ?? 0}
-        backHref={`/projects/${slug}${suffix}`}
-        strip={strip}
-        review={reviewView}
-        reviewers={reviewerOptions}
-        canReview={REVIEWER_ROLES.includes(scope.role)}
-      />
+      <>
+        <AutoRefresh active={reading} intervalMs={3000} />
+        <ClassifyEditor
+          key={`${assetId}:${String(state.annotation?.version ?? 0)}`}
+          assetId={assetId}
+          assetName={state.asset.originalName}
+          projectName={project.name}
+          imageUrl={`/api/assets/${assetId}/file?${state.asset.kind === "pdf" ? "page=1" : ""}`}
+          classes={project.classes}
+          multiLabel={project.multiLabel}
+          initialLabels={saved.success ? saved.data.labels : []}
+          baseVersion={state.annotation?.version ?? 0}
+          backHref={backHref}
+          strip={strip}
+          review={reviewView}
+          reviewers={reviewerOptions}
+          canReview={REVIEWER_ROLES.includes(scope.role)}
+        />
+      </>
     );
   }
 
@@ -180,7 +201,7 @@ export default async function LabelPage({
         baseVersion={state.annotation?.version ?? 0}
         source={source}
         engine={state.prediction?.engineVersion ?? null}
-        backHref={`/projects/${slug}${suffix}`}
+        backHref={backHref}
         position={around.position}
         total={around.total}
         strip={strip}

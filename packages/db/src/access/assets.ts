@@ -79,6 +79,7 @@ export async function registerAsset(
   requireRole(scope, "manager");
   const project = await projectInScope(scope, input.projectId);
   const prelabel = PRELABELLED_TASKS.has(project.taskType);
+  const renderPdf = input.kind === "pdf" && project.taskType === "document.classification";
   if (input.folderId) {
     const [folder] = await scope.db
       .select({ id: folders.id })
@@ -93,12 +94,12 @@ export async function registerAsset(
       .onConflictDoNothing({ target: [assets.projectId, assets.sha256] })
       .returning(columns);
     const created = inserted[0];
-    if (created && !prelabel) return { asset: created, created: true };
+    if (created && !prelabel && !renderPdf) return { asset: created, created: true };
     if (created) {
       await enqueueJob(tx, {
         orgId: scope.orgId,
         kind: "prelabel",
-        payload: { assetId: created.id },
+        payload: { assetId: created.id, ...(renderPdf ? { renderOnly: true } : {}) },
         dedupeKey: `prelabel:${created.id}`,
       });
       return { asset: created, created: true };

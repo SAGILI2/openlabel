@@ -241,8 +241,18 @@ function FileBrowserInner(props: Props) {
     };
   });
 
-  const labelHref = (id: string) =>
-    `${base}/label/${id}${props.selection === "all" ? "" : `?folder=${props.selection}`}`;
+  const labelHref = (id: string) => {
+    const q = new URLSearchParams();
+    if (props.selection !== "all") q.set("folder", props.selection);
+    if (props.view !== "list") q.set("view", props.view);
+    if (filter !== "all") q.set("filter", filter);
+    if (props.page > 1) q.set("listPage", String(props.page));
+    if (props.pageSize !== DEFAULT_PAGE_SIZE) q.set("size", String(props.pageSize));
+    if (props.search) q.set("q", props.search);
+    if (props.sort !== "oldest") q.set("sort", props.sort);
+    const query = q.toString();
+    return `${base}/label/${id}${query ? `?${query}` : ""}`;
+  };
 
   const visible = props.files;
   const counts = props.counts;

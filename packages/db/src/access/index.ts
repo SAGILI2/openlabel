@@ -63,6 +63,7 @@ export {
   storePrediction,
   storePagePrediction,
   finishDocument,
+  finishRenderedDocument,
   predictedPages,
   type PageMeta,
   type ReocrOptions,
