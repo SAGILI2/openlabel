@@ -10,7 +10,10 @@ export interface SnapshotItem {
   height: number;
   split: Split;
   annotationVersion: number;
+  /** Regions (OCR and other region tasks); empty for whole-file tasks. */
   annotation: ImageAnnotation;
+  /** Class keys for whole-file tasks (classification); empty otherwise. */
+  labels: string[];
 }
 
 export interface Snapshot {
@@ -18,6 +21,8 @@ export interface Snapshot {
   projectName: string;
   taskType: string;
   createdAt: string;
+  /** The project's classes in order (classification), for class indices and display names. */
+  classes: { key: string; name: string }[];
   items: SnapshotItem[];
 }
 

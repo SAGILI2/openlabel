@@ -4,6 +4,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -32,6 +33,13 @@ export const projects = pgTable(
      * task-type registry by the application; the constraint keeps it consistent with `modality`.
      */
     taskType: text("task").notNull(),
+    /**
+     * Classes for whole-asset tasks (classification), in display order. Keys are what's stored in
+     * annotations; names are what people see. Empty for tasks that don't use a fixed class list.
+     */
+    classes: jsonb().$type<{ key: string; name: string }[]>().notNull().default([]),
+    /** Classification: more than one class per asset is allowed. */
+    multiLabel: boolean().notNull().default(false),
     /** Approvals a page needs before it counts as approved (review rules, like branch protection). */
     requiredApprovals: integer().notNull().default(1),
     /** Lets the person who submitted a page approve it themselves (useful for solo projects). */

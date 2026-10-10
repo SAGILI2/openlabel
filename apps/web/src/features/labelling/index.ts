@@ -7,3 +7,4 @@ export {
   type Box,
   type EditableWord,
 } from "./regions";
+export { ClassifyEditor, type ClassifyEditorProps } from "./classify-editor";

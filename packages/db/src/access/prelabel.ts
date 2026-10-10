@@ -105,6 +105,16 @@ export async function finishDocument(db: Database, target: PrelabelTarget, pageC
       rotation: typeof r.rotationApplied === "number" ? r.rotationApplied : 0,
     });
   }
+  await finishRenderedDocument(db, target, pageCount, pages);
+}
+
+/** Records rendered PDF pages for tasks that display documents without running OCR. */
+export async function finishRenderedDocument(
+  db: Database,
+  target: PrelabelTarget,
+  pageCount: number,
+  pages: PageMeta[],
+): Promise<void> {
   await db.transaction(async (tx) => {
     const [asset] = await tx
       .select({ status: assets.status, mediaMeta: assets.mediaMeta })

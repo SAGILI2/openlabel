@@ -2,6 +2,7 @@
 import { redirect } from "next/navigation";
 import {
   assignSplits,
+  classificationAnnotationSchema,
   imageAnnotationSchema,
   parseCreateProjectInput,
   splitPlanSchema,
@@ -13,6 +14,7 @@ import {
   createProject,
   deleteAssets,
   deleteFolder,
+  getAsset,
   getProjectById,
   moveAssets,
   queueReocr,
@@ -21,6 +23,7 @@ import {
   reviewAsset,
   saveAnnotation,
   setRequestedReviewers,
+  setProjectClasses,
   setReviewRules,
   submitForReview,
   submitManyForReview,
@@ -44,18 +47,32 @@ function fail(err: unknown): { ok: false; error: string } {
   throw err;
 }
 
+const classesSchema = z
+  .array(z.object({ key: z.string().max(60).optional(), name: z.string().trim().min(1).max(80) }))
+  .max(200);
+
 /** Creates a project in the active organisation and opens it. */
 export async function createProjectAction(input: {
   name: string;
   slug: string;
   taskType: string;
+  classes?: { name: string }[];
+  multiLabel?: boolean;
 }): Promise<ActionResult> {
   let slug: string;
   try {
     const { scope } = await requireOrgScope();
     const parsed = parseCreateProjectInput({ ...input, description: "" }, getTaskTypeRegistry());
     if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form." };
-    const project = await createProject(scope, parsed.data);
+    const classes = classesSchema.parse(input.classes ?? []);
+    if (parsed.data.taskType.endsWith(".classification") && classes.length === 0) {
+      return { ok: false, error: "Add at least one class." };
+    }
+    const project = await createProject(scope, {
+      ...parsed.data,
+      classes,
+      multiLabel: z.boolean().parse(input.multiLabel ?? false),
+    });
     slug = project.slug;
   } catch (err) {
     return fail(err);
@@ -71,13 +88,22 @@ export async function saveAnnotationAction(
 ): Promise<ActionResult<{ version: number }>> {
   try {
     const { scope } = await requireOrgScope();
-    const annotation = imageAnnotationSchema.parse(data);
-    const saved = await saveAnnotation(
-      scope,
-      z.uuid().parse(assetId),
-      annotation,
-      z.number().int().min(0).parse(baseVersion),
-    );
+    const id = z.uuid().parse(assetId);
+    const project = await getProjectById(scope, (await getAsset(scope, id)).projectId);
+    let annotation: Record<string, unknown>;
+    if (project.taskType.endsWith(".classification")) {
+      // Only the project's own classes, and exactly one unless the project allows several.
+      const { labels } = classificationAnnotationSchema.parse(data);
+      const known = new Set(project.classes.map((c) => c.key));
+      const unique = [...new Set(labels)];
+      if (unique.some((l) => !known.has(l))) return { ok: false, error: "That class isn't in this project." };
+      if (!project.multiLabel && unique.length > 1)
+        return { ok: false, error: "This project allows one class per file." };
+      annotation = { labels: unique };
+    } else {
+      annotation = imageAnnotationSchema.parse(data);
+    }
+    const saved = await saveAnnotation(scope, id, annotation, z.number().int().min(0).parse(baseVersion));
     return { ok: true, data: saved };
   } catch (err) {
     return fail(err);
@@ -427,6 +453,24 @@ export async function reocrTurnedAction(assetId: string, rotate: number, page = 
       z.number().int().min(1).max(10_000).parse(page),
     );
     return { ok: true, data: undefined };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Replaces a project's classes; classes already used in labels can be renamed but not removed. */
+export async function setProjectClassesAction(
+  projectId: string,
+  input: { classes: { key?: string; name: string }[]; multiLabel: boolean },
+): Promise<ActionResult<{ classes: { key: string; name: string }[] }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const row = await setProjectClasses(scope, z.uuid().parse(projectId), {
+      classes: classesSchema.parse(input.classes),
+      multiLabel: z.boolean().parse(input.multiLabel),
+    });
+    refresh();
+    return { ok: true, data: { classes: row.classes } };
   } catch (err) {
     return fail(err);
   }

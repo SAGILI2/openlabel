@@ -112,6 +112,8 @@ function item(assetId: string, split: SnapshotItem["split"]): SnapshotItem {
     split,
     annotationVersion: 3,
     annotation: annotation(),
+    // Both kinds of content, so the shared contract test is fair to every exporter.
+    labels: ["invoice"],
   };
 }
 
@@ -120,6 +122,7 @@ const snapshot = (): Snapshot => ({
   projectName: "Invoices",
   taskType: "document.ocr",
   createdAt: "2026-10-07T00:00:00.000Z",
+  classes: [{ key: "invoice", name: "Invoice" }],
   items: [item("aaaaaaaa-1", "train"), item("bbbbbbbb-2", "val")],
 });
 
@@ -225,6 +228,79 @@ describe("coco", () => {
     expect(doc.annotations.map((a) => [a.bbox, a.attributes.text])).toEqual([
       [[10, 10, 40, 20], "Total"],
       [[100, 50, 30, 20], "1O5"],
+    ]);
+  });
+});
+
+describe("classification", () => {
+  const classSnapshot = (): Snapshot => ({
+    exportId: "exp-2",
+    projectName: "Docs",
+    taskType: "document.classification",
+    createdAt: "2026-10-07T00:00:00.000Z",
+    classes: [
+      { key: "invoice", name: "Invoice" },
+      { key: "receipt", name: "Receipt, paper" },
+    ],
+    items: [
+      { ...item("aaaaaaaa-1", "train"), labels: ["invoice"] },
+      { ...item("bbbbbbbb-2", "train"), labels: ["receipt"] },
+      { ...item("cccccccc-3", "test"), labels: ["invoice"] },
+    ],
+  });
+
+  async function run(id: string) {
+    const exporter = EXPORTERS.get(id);
+    if (!exporter) throw new Error(`no exporter ${id}`);
+    const chunks: Uint8Array[] = [];
+    const { sink, finish } = createZipSink((c) => chunks.push(c));
+    const stats = await exporter.run(classSnapshot(), load, sink, DEFAULT_OPTIONS);
+    await finish();
+    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let offset = 0;
+    for (const c of chunks) {
+      bytes.set(c, offset);
+      offset += c.length;
+    }
+    return { files: unzipSync(bytes), stats };
+  }
+
+  it("only offers classification formats to classification projects", () => {
+    expect(exportersFor("document.classification").map((e) => e.id)).toEqual([
+      "classification-csv",
+      "classification-jsonl",
+      "imagefolder",
+    ]);
+    expect(exportersFor("document.ocr").map((e) => e.id)).not.toContain("imagefolder");
+  });
+
+  it("writes a CSV per split and a quoted classes file", async () => {
+    const { files, stats } = await run("classification-csv");
+    expect(strFromU8(files["train.csv"] ?? new Uint8Array())).toBe(
+      "image,label\nimages/aaaaaaaa_Invoice_0187.png,invoice\nimages/bbbbbbbb_Invoice_0187.png,receipt\n",
+    );
+    expect(strFromU8(files["classes.csv"] ?? new Uint8Array())).toBe(
+      'index,key,name\n0,invoice,Invoice\n1,receipt,"Receipt, paper"\n',
+    );
+    expect(stats.train?.assets).toBe(2);
+  });
+
+  it("writes JSONL with keys, names and class indices", async () => {
+    const { files } = await run("classification-jsonl");
+    const row = JSON.parse(strFromU8(files["test.jsonl"] ?? new Uint8Array()).trim()) as {
+      labels: string[];
+      label_names: string[];
+      label_ids: number[];
+    };
+    expect([row.labels, row.label_names, row.label_ids]).toEqual([["invoice"], ["Invoice"], [0]]);
+  });
+
+  it("lays out ImageFolder as split/class/file", async () => {
+    const { files } = await run("imagefolder");
+    expect(Object.keys(files).sort()).toEqual([
+      "test/invoice/cccccccc_Invoice_0187.png",
+      "train/invoice/aaaaaaaa_Invoice_0187.png",
+      "train/receipt/bbbbbbbb_Invoice_0187.png",
     ]);
   });
 });

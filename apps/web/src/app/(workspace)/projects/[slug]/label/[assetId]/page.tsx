@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { imageAnnotationSchema } from "@openlabel/contracts";
+import { classificationAnnotationSchema, imageAnnotationSchema } from "@openlabel/contracts";
 import {
   AccessError,
   getLabellingState,
@@ -13,7 +13,7 @@ import {
   subtreeFolderIds,
 } from "@openlabel/db";
 import { AutoRefresh } from "@/features/projects";
-import { Editor, wordsFromAnnotation, wordsFromPrediction } from "@/features/labelling";
+import { ClassifyEditor, Editor, wordsFromAnnotation, wordsFromPrediction } from "@/features/labelling";
 import { getDb } from "@/server/db";
 import { pageCountOf, pageMetaOf, pageParam } from "@/server/media/upright";
 import { loadProject } from "@/server/projects/load";
@@ -25,10 +25,28 @@ export default async function LabelPage({
   searchParams,
 }: {
   params: Promise<{ slug: string; assetId: string }>;
-  searchParams: Promise<{ folder?: string; page?: string }>;
+  searchParams: Promise<{
+    folder?: string;
+    page?: string;
+    listPage?: string;
+    view?: string;
+    filter?: string;
+    size?: string;
+    q?: string;
+    sort?: string;
+  }>;
 }) {
   const [{ slug, assetId }, query] = await Promise.all([params, searchParams]);
   const { scope, project } = await loadProject(slug);
+  const listQuery = new URLSearchParams();
+  if (query.folder && query.folder !== "all") listQuery.set("folder", query.folder);
+  if (query.view === "grid") listQuery.set("view", "grid");
+  if (query.filter && query.filter !== "all") listQuery.set("filter", query.filter);
+  if (query.listPage && query.listPage !== "1") listQuery.set("page", query.listPage);
+  if (query.size) listQuery.set("size", query.size);
+  if (query.q) listQuery.set("q", query.q);
+  if (query.sort && query.sort !== "oldest") listQuery.set("sort", query.sort);
+  const listSuffix = listQuery.toString() ? `?${listQuery.toString()}` : "";
   const folder =
     query.folder === "root"
       ? "root"
@@ -62,7 +80,64 @@ export default async function LabelPage({
     ocrPending(scope, assetId),
   ]);
 
-  const suffix = folder ? `?folder=${folder}` : "";
+  const backHref = `/projects/${slug}${listSuffix}`;
+  const strip = assets.map((a) => ({
+    id: a.id,
+    name: a.originalName,
+    href: `/projects/${slug}/label/${a.id}${listSuffix}`,
+    done: a.status === "approved",
+  }));
+  const reviewView = {
+    status: review.status,
+    currentVersion: review.currentVersion,
+    submittedByMe: review.submittedByUserId === scope.userId,
+    requiredApprovals: review.requiredApprovals,
+    allowSelfApproval: review.allowSelfApproval,
+    approvals: review.approvals,
+    requested: review.requested.map((r) => ({
+      userId: r.userId,
+      name: r.name,
+      latest: r.latest,
+      stale: r.stale,
+    })),
+    history: review.history.map((h) => ({
+      id: h.id,
+      reviewerName: h.reviewerName,
+      decision: h.decision,
+      body: h.body,
+      annotationVersion: h.annotationVersion,
+      createdAt: h.createdAt.toISOString(),
+    })),
+  };
+  const reviewerOptions = reviewers
+    .filter((r) => r.userId !== scope.userId || review.allowSelfApproval)
+    .map((r) => ({ userId: r.userId, name: r.name, email: r.email }));
+
+  if (project.taskType.endsWith(".classification")) {
+    const saved = classificationAnnotationSchema.safeParse(state.annotation?.data);
+    return (
+      <>
+        <AutoRefresh active={reading} intervalMs={3000} />
+        <ClassifyEditor
+          key={`${assetId}:${String(state.annotation?.version ?? 0)}`}
+          assetId={assetId}
+          assetName={state.asset.originalName}
+          projectName={project.name}
+          imageUrl={`/api/assets/${assetId}/file?${state.asset.kind === "pdf" ? "page=1" : ""}`}
+          classes={project.classes}
+          multiLabel={project.multiLabel}
+          initialLabels={saved.success ? saved.data.labels : []}
+          baseVersion={state.annotation?.version ?? 0}
+          backHref={backHref}
+          strip={strip}
+          review={reviewView}
+          reviewers={reviewerOptions}
+          canReview={REVIEWER_ROLES.includes(scope.role)}
+        />
+      </>
+    );
+  }
+
   const meta = state.asset.mediaMeta;
 
   // A PDF is one file; the editor shows one of its pages (?page=N), with a page strip if several.
@@ -126,40 +201,12 @@ export default async function LabelPage({
         baseVersion={state.annotation?.version ?? 0}
         source={source}
         engine={state.prediction?.engineVersion ?? null}
-        backHref={`/projects/${slug}${suffix}`}
+        backHref={backHref}
         position={around.position}
         total={around.total}
-        strip={assets.map((a) => ({
-          id: a.id,
-          name: a.originalName,
-          href: `/projects/${slug}/label/${a.id}${suffix}`,
-          done: a.status === "approved",
-        }))}
-        review={{
-          status: review.status,
-          currentVersion: review.currentVersion,
-          submittedByMe: review.submittedByUserId === scope.userId,
-          requiredApprovals: review.requiredApprovals,
-          allowSelfApproval: review.allowSelfApproval,
-          approvals: review.approvals,
-          requested: review.requested.map((r) => ({
-            userId: r.userId,
-            name: r.name,
-            latest: r.latest,
-            stale: r.stale,
-          })),
-          history: review.history.map((h) => ({
-            id: h.id,
-            reviewerName: h.reviewerName,
-            decision: h.decision,
-            body: h.body,
-            annotationVersion: h.annotationVersion,
-            createdAt: h.createdAt.toISOString(),
-          })),
-        }}
-        reviewers={reviewers
-          .filter((r) => r.userId !== scope.userId || review.allowSelfApproval)
-          .map((r) => ({ userId: r.userId, name: r.name, email: r.email }))}
+        strip={strip}
+        review={reviewView}
+        reviewers={reviewerOptions}
         canReview={REVIEWER_ROLES.includes(scope.role)}
       />
     </>
