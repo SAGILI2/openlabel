@@ -69,6 +69,10 @@ services:
     restart: unless-stopped
     environment:
       OCR_THREADS: ${OCR_THREADS:-4}
+      OCR_RECO_CHECKPOINT: ${OCR_RECO_CHECKPOINT:-}
+    volumes:
+      # Optional Hindi/custom PARSeq checkpoint; leave unset for pretrained docTR PARSeq.
+      - ${OCR_RECO_CHECKPOINT_HOST:-./services/ocr-doctr/models}:/models/custom:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 15s

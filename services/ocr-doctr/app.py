@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -19,17 +20,42 @@ from PIL import Image, ImageOps
 
 DET_ARCH = os.environ.get("OCR_DET_ARCH", "db_resnet50")
 RECO_ARCH = os.environ.get("OCR_RECO_ARCH", "parseq")
+RECO_CHECKPOINT = os.environ.get("OCR_RECO_CHECKPOINT", "")
 THREADS = int(os.environ.get("OCR_THREADS", "4"))
 MAX_SIDE = int(os.environ.get("OCR_MAX_SIDE", "4000"))
 # "cuda" uses the GPU when one is visible, else falls back to CPU; "cpu" forces CPU.
 DEVICE_PREF = os.environ.get("OCR_DEVICE", "cpu")
 
 import torch  # noqa: E402  (import after env so thread settings apply)
-from doctr.models import ocr_predictor, page_orientation_predictor  # noqa: E402
+from doctr.models import ocr_predictor, page_orientation_predictor, parseq  # noqa: E402
 
 torch.set_num_threads(THREADS)
 DEVICE = "cuda" if DEVICE_PREF == "cuda" and torch.cuda.is_available() else "cpu"
-PREDICTOR = ocr_predictor(DET_ARCH, RECO_ARCH, pretrained=True, assume_straight_pages=True)
+
+
+def load_recognizer() -> tuple[Any, str]:
+    if not RECO_CHECKPOINT:
+        return RECO_ARCH, RECO_ARCH
+    checkpoint_path = Path(RECO_CHECKPOINT)
+    if not checkpoint_path.is_file():
+        raise RuntimeError(f"OCR_RECO_CHECKPOINT does not exist: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    vocab = checkpoint.get("vocab")
+    max_length = checkpoint.get("max_length")
+    state_dict = checkpoint.get("state_dict")
+    if not isinstance(vocab, str) or not vocab or not isinstance(max_length, int) or not isinstance(state_dict, dict):
+        raise RuntimeError("OCR_RECO_CHECKPOINT is missing vocab, max_length, or state_dict metadata")
+    recognizer = parseq(pretrained=False, vocab=vocab, max_length=max_length)
+    missing, unexpected = recognizer.load_state_dict(state_dict, strict=False)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"OCR_RECO_CHECKPOINT architecture mismatch; missing={list(missing)}, unexpected={list(unexpected)}"
+        )
+    return recognizer, str(checkpoint.get("engine", "doctr-parseq-custom"))
+
+
+recognizer, RECO_ENGINE_VERSION = load_recognizer()
+PREDICTOR = ocr_predictor(DET_ARCH, recognizer, pretrained=True, assume_straight_pages=True)
 # Page orientation model (0/90/180/270). Photos of slips are often sideways or upside down, and a
 # straight-page OCR reads nothing on those.
 ORIENT_ARCH = os.environ.get("OCR_ORIENTATION_ARCH", "mobilenet_v3_small_page_orientation")
@@ -41,7 +67,7 @@ if DEVICE == "cuda":
     if ORIENTER is not None:
         ORIENTER = ORIENTER.cuda()
 # Engine version names the model, not the hardware: GPU and CPU give the same labels.
-ENGINE_VERSION = f"doctr-{DET_ARCH}+{RECO_ARCH}"
+ENGINE_VERSION = f"doctr-{DET_ARCH}+{RECO_ENGINE_VERSION}"  # noqa: E501
 
 app = FastAPI(title="OpenLabel OCR (docTR)")
 
