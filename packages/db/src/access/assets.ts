@@ -45,16 +45,20 @@ const columns = {
   createdAt: assets.createdAt,
 };
 
-async function projectInScope(scope: OrgScope, projectId: string): Promise<void> {
+async function projectInScope(scope: OrgScope, projectId: string): Promise<{ taskType: string }> {
   const [row] = await scope.db
-    .select({ id: projects.id })
+    .select({ taskType: projects.taskType })
     .from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.orgId, scope.orgId)));
   if (!row) throw new AccessError("NOT_FOUND", "Project not found.");
+  return row;
 }
 
+/** Task types a model drafts before people label (OCR today); others start at "to do". */
+const PRELABELLED_TASKS = new Set(["document.ocr"]);
+
 /**
- * Records an uploaded file and queues it for pre-labelling. Uploading the same bytes to the
+ * Records an uploaded file and, for task types with a pre-label model, queues it for pre-labelling. Uploading the same bytes to the
  * same project again returns the existing asset (`created: false`).
  */
 export async function registerAsset(
@@ -73,7 +77,9 @@ export async function registerAsset(
   },
 ): Promise<{ asset: AssetRow; created: boolean }> {
   requireRole(scope, "manager");
-  await projectInScope(scope, input.projectId);
+  const project = await projectInScope(scope, input.projectId);
+  const prelabel = PRELABELLED_TASKS.has(project.taskType);
+  const renderPdf = input.kind === "pdf" && project.taskType === "document.classification";
   if (input.folderId) {
     const [folder] = await scope.db
       .select({ id: folders.id })
@@ -84,15 +90,16 @@ export async function registerAsset(
   return scope.db.transaction(async (tx) => {
     const inserted = await tx
       .insert(assets)
-      .values({ ...input, orgId: scope.orgId })
+      .values({ ...input, orgId: scope.orgId, status: prelabel ? "new" : "in_progress" })
       .onConflictDoNothing({ target: [assets.projectId, assets.sha256] })
       .returning(columns);
     const created = inserted[0];
+    if (created && !prelabel && !renderPdf) return { asset: created, created: true };
     if (created) {
       await enqueueJob(tx, {
         orgId: scope.orgId,
         kind: "prelabel",
-        payload: { assetId: created.id },
+        payload: { assetId: created.id, ...(renderPdf ? { renderOnly: true } : {}) },
         dedupeKey: `prelabel:${created.id}`,
       });
       return { asset: created, created: true };

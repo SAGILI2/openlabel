@@ -1,4 +1,4 @@
-import { imageAnnotationSchema, splitPlanSchema } from "@openlabel/contracts";
+import { classificationAnnotationSchema, imageAnnotationSchema, splitPlanSchema } from "@openlabel/contracts";
 import {
   loadExportJob,
   markExportFailed,
@@ -37,24 +37,38 @@ export async function runExport(deps: ExportDeps, job: JobRow): Promise<void> {
   await markExportRunning(deps.db, exportId);
 
   const started = Date.now();
+  const whole = data.export.taskType.endsWith(".classification");
   const snapshot: Snapshot = {
     exportId,
     projectName: data.export.projectName,
     taskType: data.export.taskType,
     createdAt: data.export.createdAt.toISOString(),
+    classes: data.export.classes,
     items: [],
   };
   // Where each exported image comes from and how far the OCR turned it. A PDF becomes one item
   // per page a person saved (`<asset>#p<n>`), so every format exports pages like images.
   const sources = new Map<string, { key: string; turn: number }>();
   for (const it of data.items) {
-    const annotation = imageAnnotationSchema.parse(it.annotation);
     const base = {
       fileName: it.originalName,
       mimeType: it.mimeType,
       split: it.split,
       annotationVersion: it.annotationVersion,
     };
+    if (whole) {
+      snapshot.items.push({
+        ...base,
+        assetId: it.assetId,
+        width: num(it.mediaMeta.width),
+        height: num(it.mediaMeta.height),
+        annotation: { tags: [], regions: [] },
+        labels: classificationAnnotationSchema.parse(it.annotation).labels,
+      });
+      sources.set(it.assetId, { key: it.storageKey, turn: num(it.mediaMeta.rotation) });
+      continue;
+    }
+    const annotation = imageAnnotationSchema.parse(it.annotation);
     if (it.kind !== "pdf") {
       snapshot.items.push({
         ...base,
@@ -62,6 +76,7 @@ export async function runExport(deps: ExportDeps, job: JobRow): Promise<void> {
         width: num(it.mediaMeta.width),
         height: num(it.mediaMeta.height),
         annotation,
+        labels: [],
       });
       sources.set(it.assetId, { key: it.storageKey, turn: num(it.mediaMeta.rotation) });
       continue;
@@ -79,6 +94,7 @@ export async function runExport(deps: ExportDeps, job: JobRow): Promise<void> {
         width: num(meta.width),
         height: num(meta.height),
         annotation: { ...annotation, regions: annotation.regions.filter((r) => (r.page ?? 1) === n) },
+        labels: [],
       });
       sources.set(id, { key: pageKey(it.storageKey, n), turn: num(meta.rotation) });
     }

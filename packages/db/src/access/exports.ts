@@ -172,7 +172,12 @@ export async function getExport(scope: OrgScope, exportId: string): Promise<Expo
 /* ---------- Worker side: acts for the system, keyed by the export id from a queued job ---------- */
 
 export interface ExportJobData {
-  export: ExportRow & { orgId: string; projectName: string; taskType: string };
+  export: ExportRow & {
+    orgId: string;
+    projectName: string;
+    taskType: string;
+    classes: { key: string; name: string }[];
+  };
   items: {
     assetId: string;
     split: Split;
@@ -188,7 +193,13 @@ export interface ExportJobData {
 
 export async function loadExportJob(db: Database, exportId: string): Promise<ExportJobData | null> {
   const [row] = await db
-    .select({ ...columns, orgId: exports.orgId, projectName: projects.name, taskType: projects.taskType })
+    .select({
+      ...columns,
+      orgId: exports.orgId,
+      projectName: projects.name,
+      taskType: projects.taskType,
+      classes: projects.classes,
+    })
     .from(exports)
     .innerJoin(projects, eq(projects.id, exports.projectId))
     .where(eq(exports.id, exportId));

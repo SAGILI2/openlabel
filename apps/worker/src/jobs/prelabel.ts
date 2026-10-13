@@ -1,5 +1,7 @@
+import sharp from "sharp";
 import {
   finishDocument,
+  finishRenderedDocument,
   loadPrelabelTarget,
   markPrelabelling,
   predictedPages,
@@ -26,6 +28,7 @@ export async function runPrelabel(deps: PrelabelDeps, job: JobRow): Promise<void
   // A re-run may name one page and a turn a person chose (see queueReocr / reocrTurned).
   const options = {
     reocr: job.payload.reocr === true,
+    renderOnly: job.payload.renderOnly === true,
     page: typeof job.payload.page === "number" ? job.payload.page : undefined,
     rotate: typeof job.payload.rotate === "number" ? job.payload.rotate : undefined,
   };
@@ -84,12 +87,33 @@ async function prelabelDocument(
   deps: PrelabelDeps,
   target: PrelabelTarget,
   pdf: Uint8Array,
-  options: { reocr: boolean; page?: number | undefined; rotate?: number | undefined },
+  options: {
+    reocr: boolean;
+    renderOnly: boolean;
+    page?: number | undefined;
+    rotate?: number | undefined;
+  },
 ): Promise<void> {
   const started = Date.now();
   const { pages } = await pdfInfo(deps.ocrServiceUrl, pdf);
   const done = options.reocr ? new Set<number>() : await predictedPages(deps.db, target.id);
   let words = 0;
+  if (options.renderOnly) {
+    const rendered: { width: number; height: number; rotation: number }[] = [];
+    for (let n = 1; n <= pages; n++) {
+      const key = pageKey(target.storageKey, n);
+      let image = (await deps.store.get(key))?.body;
+      if (!image) {
+        image = await renderPdfPage(deps.ocrServiceUrl, pdf, n);
+        await deps.store.put(key, image, "image/jpeg");
+      }
+      const metadata = await sharp(image).metadata();
+      rendered.push({ width: metadata.width, height: metadata.height, rotation: 0 });
+    }
+    await finishRenderedDocument(deps.db, target, pages, rendered);
+    deps.log("rendered document", { assetId: target.id, pages, ms: Date.now() - started });
+    return;
+  }
   for (let n = 1; n <= pages; n++) {
     if (done.has(n) || (options.page !== undefined && n !== options.page)) continue;
     const key = pageKey(target.storageKey, n);

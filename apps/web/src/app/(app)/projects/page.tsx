@@ -8,8 +8,12 @@ import { getTaskTypeRegistry } from "@/server/tasks";
 
 export const metadata = { title: "Projects" };
 
-/** Task types with a working editor in this release (OL-46). */
-const READY: ReadonlySet<string> = new Set(["document.ocr"]);
+/** Task types with a working editor in this release. */
+const READY: ReadonlySet<string> = new Set([
+  "document.ocr",
+  "document.classification",
+  "image.classification",
+]);
 
 export default async function ProjectsPage() {
   const { scope } = await requireOrgScope();
@@ -32,7 +36,7 @@ export default async function ProjectsPage() {
             <NewProjectDialog
               taskTypes={taskTypes
                 .filter((t) => READY.has(t.id))
-                .map((t) => ({ id: t.id, title: t.title, ready: true }))}
+                .map((t) => ({ id: t.id, title: t.title, ready: true, description: t.description }))}
             />
           )}
         </div>
