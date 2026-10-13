@@ -17,3 +17,6 @@ __pycache__/
 .drift-check/
 .playwright-mcp/
 packages/emails/preview/
+
+# Trained OCR checkpoints (large, license-restricted training data)
+services/ocr-doctr/models/

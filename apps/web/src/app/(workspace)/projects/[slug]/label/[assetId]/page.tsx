@@ -148,15 +148,16 @@ export default async function LabelPage({
   const savedDoc = saved?.success ? saved.data : null;
   const checkedPages = savedDoc?.pages ?? (savedDoc ? [1] : []);
   const pagePrediction = isPdf ? state.pagePredictions.get(page) : state.prediction?.result;
-  // A page someone saved shows their labels; any other page shows its OCR draft.
-  const pageSaved = isPdf ? checkedPages.includes(page) : state.annotation !== null;
-  const source = pageSaved ? "annotation" : pagePrediction ? "prediction" : "empty";
-  const words =
-    pageSaved && state.annotation
+  const savedWords =
+    state.annotation && (isPdf ? checkedPages.includes(page) : true)
       ? wordsFromAnnotation(state.annotation.data, isPdf ? page : undefined)
-      : pagePrediction
-        ? wordsFromPrediction(pagePrediction, isPdf ? page : undefined)
-        : [];
+      : [];
+  // A page someone saved shows their labels; any other page shows its OCR draft. A saved page with
+  // every box deleted shows the OCR again, so a fresh reading isn't hidden behind an empty draft.
+  const pageSaved = savedWords.length > 0;
+  const source = pageSaved ? "annotation" : pagePrediction ? "prediction" : "empty";
+  const ocrWords = pagePrediction ? wordsFromPrediction(pagePrediction, isPdf ? page : undefined) : [];
+  const words = pageSaved ? savedWords : ocrWords;
   const pageHrefBase = `/projects/${slug}/label/${assetId}?${new URLSearchParams({ ...(folder ? { folder } : {}), page: "" }).toString()}`;
   const document =
     isPdf && pageCount > 1
@@ -198,6 +199,7 @@ export default async function LabelPage({
         rotation={pageMeta.rotation}
         reading={reading}
         initialWords={words}
+        ocrWords={ocrWords}
         baseVersion={state.annotation?.version ?? 0}
         source={source}
         engine={state.prediction?.engineVersion ?? null}

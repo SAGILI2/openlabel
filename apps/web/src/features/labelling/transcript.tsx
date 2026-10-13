@@ -5,8 +5,9 @@ import { needsCheck, wordState, type EditableWord } from "./regions";
 
 /**
  * The page's text, line by line. Every word is its own small field, so clicking one selects and
- * edits exactly that word. Keys: Tab / Shift+Tab move between words, Enter jumps to the next line,
- * Alt+arrows move a word between lines or within one, emptying a word and pressing Delete removes it.
+ * edits exactly that word. Keys: Tab / Shift+Tab or ← → (at the text's edge) move between words,
+ * ↑ ↓ change line, Enter jumps to the next line, Alt+arrows move a word between lines or within
+ * one, emptying a word and pressing Delete removes it.
  */
 export const Transcript = forwardRef<
   HTMLDivElement,
@@ -25,7 +26,8 @@ export const Transcript = forwardRef<
     onRemove: (id: string) => void;
     onMoveLine: (id: string, dir: -1 | 1) => void;
     onReorder: (id: string, dir: -1 | 1) => void;
-    onScroll: () => void;
+    /** Arrow keys: ← → at the edge of the text go to the previous / next word, ↑ ↓ change line. */
+    onArrow: (id: string, dir: "prev" | "next" | "up" | "down") => void;
     onMenu: (id: string, clientX: number, clientY: number) => void;
   }
 >(function Transcript(p, ref) {
@@ -54,11 +56,7 @@ export const Transcript = forwardRef<
           )}
         </span>
       </div>
-      <div
-        ref={ref}
-        onScroll={p.onScroll}
-        className="scroll-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-3"
-      >
+      <div ref={ref} className="scroll-fade min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-1.5 pb-3">
         {p.lines.length === 0 && (
           <p className="text-muted-foreground px-3 py-6 text-[12px]">
             No text yet. Drag on the page around some text to add a box.
@@ -111,6 +109,19 @@ export const Transcript = forwardRef<
                           } else if (e.altKey && (k === "ArrowLeft" || k === "ArrowRight")) {
                             e.preventDefault();
                             p.onReorder(id, k === "ArrowLeft" ? -1 : 1);
+                          } else if (k === "ArrowUp" || k === "ArrowDown") {
+                            e.preventDefault();
+                            p.onArrow(id, k === "ArrowDown" ? "down" : "up");
+                          } else if (
+                            (k === "ArrowLeft" || k === "ArrowRight") &&
+                            !e.shiftKey &&
+                            e.currentTarget.selectionStart === e.currentTarget.selectionEnd &&
+                            e.currentTarget.selectionStart ===
+                              (k === "ArrowLeft" ? 0 : e.currentTarget.value.length)
+                          ) {
+                            // At the start / end of the text the cursor carries on into the next word.
+                            e.preventDefault();
+                            p.onArrow(id, k === "ArrowRight" ? "next" : "prev");
                           } else if (k === "Enter") {
                             e.preventDefault();
                             p.onNextLine(id);

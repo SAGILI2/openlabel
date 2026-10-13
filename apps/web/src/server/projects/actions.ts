@@ -458,6 +458,19 @@ export async function reocrTurnedAction(assetId: string, rotate: number, page = 
   }
 }
 
+/** Reads one open file again with OCR, as it's turned now (the editor's "Re-run OCR"). */
+export async function reocrAssetAction(assetId: string): Promise<ActionResult<{ queued: number }>> {
+  try {
+    const { scope } = await requireOrgScope();
+    const id = z.uuid().parse(assetId);
+    const asset = await getAsset(scope, id);
+    const r = await queueReocr(scope, asset.projectId, { assetIds: [id] });
+    return { ok: true, data: { queued: r.queued } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 /** Replaces a project's classes; classes already used in labels can be renamed but not removed. */
 export async function setProjectClassesAction(
   projectId: string,

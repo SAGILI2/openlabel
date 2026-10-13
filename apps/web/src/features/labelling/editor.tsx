@@ -47,7 +47,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { ReviewPanel, type ReviewerOption, type ReviewView } from "@/features/review";
 import { savePreferencesAction } from "@/server/preferences/actions";
-import { reocrTurnedAction, saveAnnotationAction, submitForReviewAction } from "@/server/projects/actions";
+import { useDialogs } from "@/components/dialogs";
+import {
+  reocrAssetAction,
+  reocrTurnedAction,
+  saveAnnotationAction,
+  submitForReviewAction,
+} from "@/server/projects/actions";
 import { BoxCard } from "./box-card";
 import type { CanvasHandle } from "./canvas-stage";
 import { Connector } from "./connector";
@@ -106,6 +112,8 @@ export interface EditorProps {
   /** OCR is waiting or running for this file (e.g. after turning the page). */
   reading: boolean;
   initialWords: EditableWord[];
+  /** The latest OCR reading of this page, for "Discard draft". */
+  ocrWords: EditableWord[];
   baseVersion: number;
   source: "annotation" | "prediction" | "empty";
   engine: string | null;
@@ -165,6 +173,7 @@ function ToolButton({
  */
 export function Editor(props: EditorProps) {
   const router = useRouter();
+  const dialogs = useDialogs();
   const [words, setWords] = useState(props.initialWords);
   // Reading order: lines of word ids. Words keep their own boxes.
   const [lines, setLines] = useState<string[][]>(() => linesFromWords(props.initialWords));
@@ -179,7 +188,6 @@ export function Editor(props: EditorProps) {
     void savePreferencesAction({ [key]: value }).catch(() => undefined);
   };
   const stripHidden = prefs.hideFileStrip;
-  const [linkTick, setLinkTick] = useState(0);
   const inkRef = useRef<Ink | null>(null);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const openMenu = (id: string, x: number, y: number) => {
@@ -434,6 +442,36 @@ export function Editor(props: EditorProps) {
     if (target) select(target, true);
   }
 
+  /**
+   * Arrow-key navigation between boxes: ← / → step through words in reading order; ↑ / ↓ go to
+   * the line above or below, to the word whose box sits closest horizontally.
+   */
+  function moveSelection(from: string, dir: "prev" | "next" | "up" | "down", focusText = false) {
+    let target: string | undefined;
+    if (dir === "prev" || dir === "next") {
+      const i = ordered.indexOf(from);
+      target = ordered[Math.min(Math.max(i + (dir === "next" ? 1 : -1), 0), ordered.length - 1)];
+    } else {
+      const li = lines.findIndex((l) => l.includes(from));
+      const line = lines[li + (dir === "down" ? 1 : -1)];
+      const here = byId.get(from);
+      if (line && here) {
+        const cx = here.box.x + here.box.width / 2;
+        let best = Infinity;
+        for (const id of line) {
+          const w = byId.get(id);
+          if (!w) continue;
+          const dist = Math.abs(w.box.x + w.box.width / 2 - cx);
+          if (dist < best) {
+            best = dist;
+            target = id;
+          }
+        }
+      }
+    }
+    if (target && target !== from) select(target, focusText);
+  }
+
   /** The next word (after the selected one, wrapping) the OCR wasn't sure about. */
   function nextLow() {
     const start = selectedId ? ordered.indexOf(selectedId) : -1;
@@ -451,6 +489,46 @@ export function Editor(props: EditorProps) {
   /** Confirms an OCR word is right as read (V on a selected word, or the ✓ in the box card). */
   function verify(id: string, on = true) {
     update((ws) => ws.map((w) => (w.id === id ? { ...w, verified: on } : w)));
+  }
+
+  /**
+   * Throws the draft away and starts again from the latest OCR reading. Saved as a new version, so
+   * earlier drafts stay in the history.
+   */
+  async function discard() {
+    const ok = await dialogs.confirm({
+      title: "Discard this draft?",
+      description:
+        "Your edits on this page are replaced by the latest OCR reading. Earlier versions are kept in the history.",
+      confirmLabel: "Discard draft",
+      destructive: true,
+    });
+    if (!ok) return;
+    const ws = props.ocrWords;
+    update(
+      () => ws,
+      () => linesFromWords(ws),
+    );
+    setSelectedId(null);
+    setNote(ws.length ? "Back to the OCR reading." : "No OCR reading for this page yet; the page is empty.");
+  }
+
+  /** Reads this page again with OCR. Saved labels are kept; the new reading shows once it's done. */
+  async function rerunOcr() {
+    const ok = await dialogs.confirm({
+      title: "Re-run OCR on this page?",
+      description:
+        "The page is read again as it's turned now. Labels you saved are kept; if you cleared every box, the new reading replaces the empty draft.",
+      confirmLabel: "Re-run OCR",
+    });
+    if (!ok) return;
+    setError(null);
+    startTransition(async () => {
+      const r = await reocrAssetAction(props.assetId);
+      if (!r.ok) setError(r.error);
+      else if (r.data.queued === 0) setError("OCR is already running for this file.");
+      else router.refresh();
+    });
   }
 
   /** Puts back what the OCR read. */
@@ -521,12 +599,19 @@ export function Editor(props: EditorProps) {
       else if (e.key === "Enter") {
         e.preventDefault();
         select(selectedId, true);
-      } else if (e.key.startsWith("Arrow") && selected) {
+      } else if (e.key.startsWith("Arrow") && selected && (e.ctrlKey || e.metaKey)) {
+        // Ctrl+arrows nudge the box (Shift for 10px).
         e.preventDefault();
         const d = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -d : e.key === "ArrowRight" ? d : 0;
         const dy = e.key === "ArrowUp" ? -d : e.key === "ArrowDown" ? d : 0;
         onChangeBox(selectedId, { ...selected.box, x: selected.box.x + dx, y: selected.box.y + dy });
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        moveSelection(selectedId, e.key === "ArrowRight" ? "next" : "prev");
+      } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        e.preventDefault();
+        moveSelection(selectedId, e.key === "ArrowDown" ? "down" : "up");
       } else if (e.key === "]" && next) save(next.href);
       else if (e.key === "[" && prev) router.push(prev.href);
     }
@@ -671,8 +756,29 @@ export function Editor(props: EditorProps) {
                 });
               }}
             />
+            <ToolButton
+              label="Re-run OCR on this page"
+              onClick={() => {
+                void rerunOcr();
+              }}
+            >
+              <ScanSearch className="size-4" />
+            </ToolButton>
             <ShortcutsButton />
           </div>
+          {(version > 0 || dirty) && submittable && (
+            <button
+              type="button"
+              disabled={pending}
+              title="Throw away your edits and start again from the OCR reading"
+              onClick={() => {
+                void discard();
+              }}
+              className="text-muted-foreground hover:text-foreground hover:bg-muted hidden h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] md:flex"
+            >
+              <RotateCcw className="size-3.5" /> Discard draft
+            </button>
+          )}
           <span
             className={cn(
               "hidden max-w-[220px] truncate text-[12px] whitespace-nowrap md:inline",
@@ -783,9 +889,6 @@ export function Editor(props: EditorProps) {
             onDraw={onDraw}
             onBoxMenu={openMenu}
             showBoxes={prefs.showBoxes}
-            onViewChange={() => {
-              setLinkTick((t) => t + 1);
-            }}
           />
           <aside className="bg-card flex h-full min-h-0 min-w-0 flex-col">
             <div
@@ -919,10 +1022,10 @@ export function Editor(props: EditorProps) {
                       (ls) => reorder(ls, id, dir),
                     );
                   }}
-                  onMenu={openMenu}
-                  onScroll={() => {
-                    setLinkTick((t) => t + 1);
+                  onArrow={(id, dir) => {
+                    moveSelection(id, dir, true);
                   }}
+                  onMenu={openMenu}
                 />
               </SplitStack>
             )}
@@ -955,7 +1058,6 @@ export function Editor(props: EditorProps) {
         />
       )}
       <Connector
-        tick={linkTick}
         from={() => (selectedId ? (canvasRef.current?.boxOnScreen(selectedId) ?? null) : null)}
         to={() => {
           const el = selectedId
@@ -1055,7 +1157,9 @@ function ShortcutsButton() {
     ["Drag on empty space", "Draw a box (snaps to the text)"],
     ["Drag a box / handles", "Move / resize"],
     ["Right-click a box or word", "Box actions: edit, snap, move, delete"],
-    ["← ↑ → ↓", "Nudge 1px · Shift 10px"],
+    ["← / →", "Previous / next word"],
+    ["↑ / ↓", "Word in the line above / below"],
+    ["Ctrl+arrows", "Nudge box 1px · Shift 10px"],
     ["S", "Snap the box to its text"],
     ["Enter", "Edit the selected word"],
     ["Del", "Delete the box"],
